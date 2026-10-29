@@ -8,17 +8,70 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Sentinel, not a secret: its only job is to be recognisable so a production
+# boot can refuse it.
+DEV_JWT_SECRET = "dev-secret-change-me"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="STARNET_", extra="ignore")
 
     # --- infrastructure ---------------------------------------------------
     database_url: str = "postgresql+psycopg://starnet:starnet@localhost:55432/starnet"
-    jwt_secret: str = "dev-secret-change-me"
+    jwt_secret: str = DEV_JWT_SECRET
     jwt_algorithm: str = "HS256"
     jwt_ttl_minutes: int = 60 * 24 * 7
     media_root: str = "./media"
     seed_on_startup: bool = False
+
+    # "development" or "production". Production is not a cosmetic label: it
+    # makes the app refuse to start with the dev JWT secret, with the demo
+    # seed enabled, or with no CORS allowlist. A deployment that is insecure
+    # should fail loudly at boot rather than quietly serve traffic.
+    environment: str = "development"
+
+    # Comma-separated origins allowed to call the API from a browser. Empty
+    # means the local dev defaults; in production it must be set explicitly.
+    cors_origins: str = ""
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() == "production"
+
+    @property
+    def allowed_origins(self) -> list[str]:
+        explicit = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        if explicit:
+            return explicit
+        # Vite dev server and the Expo web/dev-client ports.
+        return ["http://localhost:5173", "http://localhost:8081", "http://localhost:19006"]
+
+    def production_problems(self) -> list[str]:
+        """Everything that makes this configuration unsafe to expose.
+
+        Collected rather than raised one at a time so a deployer sees the whole
+        list on the first failed boot instead of fixing them one restart apiece.
+        """
+        problems: list[str] = []
+        if self.jwt_secret == DEV_JWT_SECRET or len(self.jwt_secret) < 32:
+            problems.append(
+                "STARNET_JWT_SECRET is the dev default or shorter than 32 characters. "
+                "Anyone who knows it can mint a token for any account, including an "
+                "admin. Generate one with: python -c \"import secrets; "
+                "print(secrets.token_urlsafe(48))\""
+            )
+        if self.seed_on_startup:
+            problems.append(
+                "STARNET_SEED_ON_STARTUP is on. The seed creates six accounts that "
+                f"all share the password published in the README, one of them an "
+                "admin. Never enable it on an instance reachable from the internet."
+            )
+        if not [o.strip() for o in self.cors_origins.split(",") if o.strip()]:
+            problems.append(
+                "STARNET_CORS_ORIGINS is empty, which would fall back to localhost. "
+                "Set it to the dashboard's real origin."
+            )
+        return problems
 
     # --- reward engine (section 5) ---------------------------------------
     r0_base_points: float = 100.0

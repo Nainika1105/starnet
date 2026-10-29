@@ -31,8 +31,13 @@ def _ensure_database() -> None:
     admin_engine.dispose()
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def database():
+    """Set up the throwaway schema once.
+
+    Requested through `db` rather than autouse, so the tests that are pure
+    functions of config or arithmetic do not need Postgres running to execute.
+    """
     _ensure_database()
     with engine.begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))

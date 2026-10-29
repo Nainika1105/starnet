@@ -32,8 +32,29 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
 
+def check_production_config() -> None:
+    """Refuse to boot an unsafe production instance.
+
+    The failure modes this catches are not subtle -- a known JWT secret, or a
+    public instance seeded with six accounts sharing a password printed in the
+    README, one of them an admin. Both would be silent: the app would come up
+    and serve traffic perfectly well while anyone could sign in as the city.
+    """
+    if not settings.is_production:
+        return
+
+    problems = settings.production_problems()
+    if problems:
+        listed = "\n".join(f"  {n}. {p}" for n, p in enumerate(problems, 1))
+        raise RuntimeError(
+            f"Refusing to start: STARNET_ENVIRONMENT=production with "
+            f"{len(problems)} unsafe setting(s).\n{listed}"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    check_production_config()
     init_db()
 
     if settings.seed_on_startup:
@@ -67,7 +88,12 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
     )
     scheduler.start()
-    log.info("STAR-Net API ready (g_verification=%s)", settings.g_verification)
+    log.info(
+        "STAR-Net API ready (env=%s, confidence=%s, g_verification=%s)",
+        settings.environment,
+        settings.confidence_mode,
+        settings.g_verification,
+    )
 
     yield
 
@@ -81,12 +107,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Auth travels as a bearer token in a header, not a cookie, so credentials are
+# not needed here -- and allowing them alongside a wildcard origin is something
+# browsers reject outright. The allowlist comes from config: localhost in dev,
+# the dashboard's real origin in production.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # demo only
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 for r in (auth.router, reports.router, issues.router, tasks.router, wallet.router, admin.router):

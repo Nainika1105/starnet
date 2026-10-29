@@ -47,6 +47,9 @@ services:
   admin:
     build:
       context: ../admin
+      # The dev server, for local work only. The production image is the
+      # Dockerfile's default target: a static build served by nginx.
+      target: dev
     environment:
       VITE_API_BASE: http://localhost:8000
     ports:
