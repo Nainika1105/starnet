@@ -1,0 +1,59 @@
+name: starnet
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    # The official PostGIS images are amd64-only; on Apple Silicon this runs
+    # under emulation. Declared explicitly so Compose does not warn each run.
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: starnet
+      POSTGRES_PASSWORD: starnet
+      POSTGRES_DB: starnet
+    ports:
+      - "55432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      # On a first run the entrypoint brings up a temporary server to create
+      # the database, and plain pg_isready answers for that one -- so the API
+      # can be let through seconds before the real server is listening. The
+      # query makes the check prove it is talking to the actual instance.
+      test: ["CMD-SHELL", "psql -U starnet -d starnet -c 'SELECT 1' > /dev/null 2>&1"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  api:
+    build:
+      context: ../api
+    environment:
+      STARNET_DATABASE_URL: postgresql+psycopg://starnet:starnet@db:5432/starnet
+      STARNET_JWT_SECRET: dev-secret-change-me
+      STARNET_SEED_ON_STARTUP: "true"
+      STARNET_MEDIA_ROOT: /media
+    ports:
+      - "8000:8000"
+    volumes:
+      - media_data:/media
+    # Belt and braces for first boot: if the API still loses the race to the
+    # database, it comes back rather than leaving the stack half up.
+    restart: on-failure
+    depends_on:
+      db:
+        condition: service_healthy
+
+  admin:
+    build:
+      context: ../admin
+    environment:
+      VITE_API_BASE: http://localhost:8000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+
+volumes:
+  db_data:
+  media_data:

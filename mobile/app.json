@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "STAR-Net",
+    "slug": "starnet",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "splash": { "backgroundColor": "#101317" },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "demo.starnet.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "STAR-Net needs the camera to photograph civic faults and confirmed repairs. Photos must be taken live, not chosen from your library.",
+        "NSLocationWhenInUseUsageDescription": "STAR-Net tags each report with its location so the city can find the fault."
+      }
+    },
+    "android": {
+      "package": "demo.starnet.app",
+      "permissions": ["CAMERA", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "STAR-Net needs the camera to photograph civic faults and confirmed repairs."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "STAR-Net tags each report with its location."
+        }
+      ]
+    ],
+    "extra": {
+      "apiBase": "http://localhost:8000"
+    }
+  }
+}
