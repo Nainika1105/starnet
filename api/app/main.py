@@ -7,11 +7,12 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app import models  # noqa: F401  (registers the mapped classes)
+from app import storage
 from app.config import settings
 from app.jobs import (
     expire_stale_confirmations,
@@ -47,7 +48,7 @@ def init_db() -> None:
     root = Path(__file__).resolve().parent.parent
     config = Config(str(root / "alembic.ini"))
     config.set_main_option("script_location", str(root / "migrations"))
-    config.set_main_option("sqlalchemy.url", settings.database_url)
+    config.set_main_option("sqlalchemy.url", settings.normalised_database_url)
     # Leave this process's logging alone -- alembic.ini configures the root
     # logger at WARNING, which would silence the app's own INFO output for the
     # rest of its life. See the note in migrations/env.py.
@@ -63,14 +64,14 @@ def check_production_config() -> None:
     README, one of them an admin. Both would be silent: the app would come up
     and serve traffic perfectly well while anyone could sign in as the city.
     """
-    if not settings.is_production:
+    if not settings.is_public:
         return
 
     problems = settings.production_problems()
     if problems:
         listed = "\n".join(f"  {n}. {p}" for n, p in enumerate(problems, 1))
         raise RuntimeError(
-            f"Refusing to start: STARNET_ENVIRONMENT=production with "
+            f"Refusing to start: STARNET_ENVIRONMENT={settings.mode} with "
             f"{len(problems)} unsafe setting(s).\n{listed}"
         )
 
@@ -145,10 +146,32 @@ app.add_middleware(
 for r in (auth.router, reports.router, issues.router, tasks.router, wallet.router, admin.router):
     app.include_router(r)
 
-# Only the local backend serves photos from this process. With object storage
-# the API never proxies the bytes -- `storage.url_for` hands out a presigned URL
-# and the client fetches it directly.
-if settings.storage_backend.strip().lower() != "s3":
+# How photos get served depends on where they live. With object storage the API
+# never touches the bytes -- `storage.url_for` hands out a presigned URL and the
+# client fetches the store directly.
+_BACKEND = settings.storage_backend.strip().lower()
+
+if _BACKEND == "db":
+
+    @app.get("/media/{key}", tags=["meta"])
+    def media(key: str) -> Response:
+        """Serve a photo out of the database.
+
+        Cached hard and immutably: a key is a content-addressed-style random
+        name that is never reused, so a client that has one copy never needs
+        another.
+        """
+        found = storage.load(key)
+        if found is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No such photo")
+        data, content_type = found
+        return Response(
+            content=data,
+            media_type=content_type,
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
+
+elif _BACKEND != "s3":
     Path(settings.media_root).mkdir(parents=True, exist_ok=True)
     app.mount("/media", StaticFiles(directory=settings.media_root), name="media")
 

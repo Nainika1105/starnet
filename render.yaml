@@ -1,0 +1,59 @@
+# Render blueprint. In the Render dashboard: New -> Blueprint -> pick this
+# repository. It creates the web service and the Postgres database with every
+# setting below already wired, including a generated JWT secret.
+#
+# What this deploys is the DEMO configuration, which is a deliberate middle
+# ground between a laptop and a real deployment:
+#
+#   - STARNET_ENVIRONMENT=demo still refuses a guessable JWT secret, because
+#     the URL is public and anyone can reach it.
+#   - It permits the seeded accounts, which are the point here: someone opening
+#     the link needs data to look at and an account to sign in with.
+#   - Photos go in Postgres rather than on disk, because a free instance's
+#     filesystem is wiped on every redeploy and a demo whose images all 404
+#     demonstrates nothing. See app/storage.py for why that is not the answer
+#     at scale.
+#
+# For a real deployment, set STARNET_ENVIRONMENT=production and
+# STARNET_STORAGE_BACKEND=s3 with object-storage credentials, and turn the seed
+# off. The app refuses to start otherwise, which is the intended behaviour.
+
+databases:
+  - name: starnet-db
+    databaseName: starnet
+    plan: free
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: starnet
+    runtime: docker
+    plan: free
+    region: singapore
+    # The repository root, because the image builds the dashboard it serves.
+    dockerContext: .
+    dockerfilePath: ./api/Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: STARNET_DATABASE_URL
+        fromDatabase:
+          name: starnet-db
+          property: connectionString
+      # Render hands out a postgres:// URL; the app rewrites the scheme to name
+      # its driver. See Settings.normalised_database_url.
+      - key: STARNET_ENVIRONMENT
+        value: demo
+      - key: STARNET_JWT_SECRET
+        generateValue: true
+      - key: STARNET_SEED_ON_STARTUP
+        value: "true"
+      - key: STARNET_STORAGE_BACKEND
+        value: db
+      # The dashboard is served from this same host, so same-origin requests
+      # need no CORS entry at all. Set only if something else must call the API.
+      - key: STARNET_CORS_ORIGINS
+        value: ""
+      - key: STARNET_CONFIDENCE_MODE
+        value: fusion
+      - key: STARNET_CLUSTERING_ENABLED
+        value: "true"

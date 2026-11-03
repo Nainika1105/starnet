@@ -6,6 +6,11 @@ Two backends, chosen by STARNET_STORAGE_BACKEND:
          for most deployments: a container filesystem is ephemeral, so the
          photos -- which ARE the evidence this whole mechanism rests on -- are
          lost on the next redeploy.
+  db     Rows in Postgres, served back through /media. For a host with an
+         ephemeral disk and no object storage -- a free tier, typically --
+         where the alternative is a demo whose every image 404s after a
+         deploy. Durable, and deliberately not the answer at scale: blobs in
+         the primary database bloat backups and compete with queries for cache.
   s3     Any S3-compatible object store: AWS, Supabase Storage, Cloudflare R2,
          MinIO. Objects are written private and handed out as presigned URLs,
          so a photo is not world-readable just because someone guessed a key.
@@ -199,6 +204,40 @@ def _s3_client():
     )
 
 
+def _save_to_db(key: str, clean: bytes) -> None:
+    """Insert the photo as a row.
+
+    Opens its own session rather than taking the request's. Storage is called
+    from the middle of report intake, and a failure to write a photo should
+    not poison the transaction that is recording the report itself.
+    """
+    from app.db import SessionLocal
+    from app.models import MediaObject
+
+    with SessionLocal() as db:
+        db.add(MediaObject(key=key, content_type="image/jpeg", data=clean))
+        db.commit()
+
+
+def load(key: str) -> tuple[bytes, str] | None:
+    """Read a photo back. Only the `db` backend needs this.
+
+    `local` is served by a static mount and `s3` by a presigned URL straight
+    from the store, so neither passes bytes back through this process.
+    """
+    if _backend() != "db":
+        return None
+
+    from app.db import SessionLocal
+    from app.models import MediaObject
+
+    with SessionLocal() as db:
+        row = db.get(MediaObject, key)
+        if row is None:
+            return None
+        return bytes(row.data), row.content_type
+
+
 def save(raw: bytes, *, suffix: str = ".jpg") -> str:
     """Persist the photo with EXIF stripped. Returns a storage key.
 
@@ -208,6 +247,10 @@ def save(raw: bytes, *, suffix: str = ".jpg") -> str:
     """
     key = f"{uuid.uuid4().hex}{suffix}"
     clean = strip_exif(raw, suffix=suffix)
+
+    if _backend() == "db":
+        _save_to_db(key, clean)
+        return key
 
     if _backend() == "s3":
         _s3_client().put_object(
@@ -243,4 +286,7 @@ def url_for(key: str | None) -> str | None:
             ExpiresIn=settings.s3_url_ttl_seconds,
         )
 
+    # Both `local` and `db` are served by this app under /media -- a static
+    # mount for one, a route for the other -- so the URL is the same either way
+    # and nothing downstream has to know which is in use.
     return f"/media/{key}"

@@ -44,8 +44,9 @@ class Settings(BaseSettings):
     payments_simulated: bool = True
 
     # --- photo storage ----------------------------------------------------
-    # "local" (a directory served at /media) or "s3" (any S3-compatible store:
-    # AWS, Supabase Storage, Cloudflare R2, MinIO).
+    # "local" (a directory served at /media), "db" (rows in Postgres, for a
+    # host with an ephemeral disk and no object storage) or "s3" (any
+    # S3-compatible store: AWS, Supabase Storage, Cloudflare R2, MinIO).
     #
     # On a platform with an ephemeral filesystem, "local" loses every photo on
     # redeploy -- and the photos are the evidence the reward mechanism rests
@@ -63,10 +64,16 @@ class Settings(BaseSettings):
     # URL stops working.
     s3_url_ttl_seconds: int = 3600
 
-    # "development" or "production". Production is not a cosmetic label: it
-    # makes the app refuse to start with the dev JWT secret, with the demo
-    # seed enabled, or with no CORS allowlist. A deployment that is insecure
-    # should fail loudly at boot rather than quietly serve traffic.
+    # "development", "demo" or "production". Not a cosmetic label -- each mode
+    # changes what the app refuses to start with.
+    #
+    #   development  a laptop. Nothing enforced.
+    #   demo         publicly reachable, disposable data. A guessable JWT
+    #                secret is still refused, because anyone can reach it; the
+    #                seeded accounts and non-durable photo storage are the
+    #                point rather than a mistake.
+    #   production   real reports from real people. Everything enforced,
+    #                including durable storage and no demo seed.
     environment: str = "development"
 
     # Comma-separated origins allowed to call the API from a browser. Empty
@@ -74,14 +81,57 @@ class Settings(BaseSettings):
     cors_origins: str = ""
 
     @property
+    def mode(self) -> str:
+        return self.environment.strip().lower()
+
+    @property
     def is_production(self) -> bool:
-        return self.environment.strip().lower() == "production"
+        return self.mode == "production"
+
+    @property
+    def is_public(self) -> bool:
+        """Reachable by people who are not the developer.
+
+        What both public modes have in common is that the JWT secret cannot be
+        guessable. What separates them is durability: a demo may lose its
+        photos and may ship seeded accounts; production may not.
+        """
+        return self.mode in ("production", "demo")
+
+    @property
+    def normalised_database_url(self) -> str:
+        """The database URL with a driver this app can actually use.
+
+        Managed hosts hand out `postgres://` or `postgresql://` URLs -- Render,
+        Heroku, Supabase, Neon all do. SQLAlchemy needs the driver named, and
+        silently picks psycopg2 (not installed here) for a bare
+        `postgresql://`. Rewriting it here means the host's own connection
+        string can be pasted in or wired straight through, which is the
+        difference between a deployment that works and one that fails at boot
+        with an unhelpful import error.
+        """
+        url = self.database_url.strip()
+        for prefix in ("postgres://", "postgresql://"):
+            if url.startswith(prefix):
+                return "postgresql+psycopg://" + url[len(prefix):]
+        return url
+
+    @property
+    def allowlisted_origins(self) -> list[str]:
+        """Exactly what was configured, with no dev fallback."""
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
     def allowed_origins(self) -> list[str]:
-        explicit = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        explicit = self.allowlisted_origins
         if explicit:
             return explicit
+        if self.is_public:
+            # Serving the dashboard from this host means every request from it
+            # is same-origin, and same-origin requests do not use CORS at all.
+            # An empty allowlist is then the tightest possible setting rather
+            # than a missing one: nothing cross-origin is permitted.
+            return []
         # Vite dev server and the Expo web/dev-client ports.
         return ["http://localhost:5173", "http://localhost:8081", "http://localhost:19006"]
 
@@ -92,6 +142,9 @@ class Settings(BaseSettings):
         list on the first failed boot instead of fixing them one restart apiece.
         """
         problems: list[str] = []
+        if not self.is_public:
+            return problems
+
         if self.jwt_secret == DEV_JWT_SECRET or len(self.jwt_secret) < 32:
             problems.append(
                 "STARNET_JWT_SECRET is the dev default or shorter than 32 characters. "
@@ -99,16 +152,19 @@ class Settings(BaseSettings):
                 "admin. Generate one with: python -c \"import secrets; "
                 "print(secrets.token_urlsafe(48))\""
             )
-        if self.seed_on_startup:
+        if self.seed_on_startup and self.is_production:
             problems.append(
                 "STARNET_SEED_ON_STARTUP is on. The seed creates six accounts that "
                 f"all share the password published in the README, one of them an "
                 "admin. Never enable it on an instance reachable from the internet."
             )
-        if not [o.strip() for o in self.cors_origins.split(",") if o.strip()]:
+        serves_own_dashboard = bool(self.dashboard_dir.strip())
+        if not self.allowlisted_origins and not serves_own_dashboard:
             problems.append(
-                "STARNET_CORS_ORIGINS is empty, which would fall back to localhost. "
-                "Set it to the dashboard's real origin."
+                "STARNET_CORS_ORIGINS is empty and this instance does not serve "
+                "its own dashboard, so the browser app would be on another "
+                "origin with no entry allowing it. Set it to the dashboard's "
+                "real origin."
             )
         if not self.payments_simulated:
             problems.append(
@@ -117,7 +173,7 @@ class Settings(BaseSettings):
                 "while issuing nothing. Points in this system are not money. "
                 "Implement app/fulfilment.py before changing this."
             )
-        if self.storage_backend.strip().lower() == "local":
+        if self.storage_backend.strip().lower() == "local" and self.is_production:
             problems.append(
                 "STARNET_STORAGE_BACKEND is 'local'. On a host with an ephemeral "
                 "filesystem every photo is lost on redeploy, and the photographs "

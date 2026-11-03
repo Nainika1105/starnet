@@ -6,6 +6,7 @@ from geoalchemy2 import Geography
 from sqlalchemy import (
     Boolean,
     DateTime,
+    LargeBinary,
     Enum,
     Float,
     ForeignKey,
@@ -245,6 +246,28 @@ class Redemption(Base):
     # system and nothing is issued; see app/fulfilment.py.
     simulated: Mapped[bool] = mapped_column(Boolean, default=True)
     fulfilment_reference: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MediaObject(Base):
+    """A photo stored in the database.
+
+    Used by the `db` storage backend, which exists for one specific situation:
+    a host with an ephemeral filesystem and no object storage. On a free tier
+    the container's disk is wiped on every redeploy, and the photographs are
+    the evidence the whole vesting mechanism rests on -- a demo whose images
+    all 404 after a deploy demonstrates nothing. Postgres persists, so they go
+    here.
+
+    Not the right answer at scale: blobs in the primary database bloat backups
+    and compete with queries for cache. `s3` is the backend for real volume.
+    """
+
+    __tablename__ = "media_objects"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    content_type: Mapped[str] = mapped_column(String(64), default="image/jpeg")
+    data: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

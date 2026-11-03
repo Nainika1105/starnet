@@ -26,7 +26,7 @@ config = context.config
 # the tests, which migrate a throwaway database that is deliberately not the
 # one STARNET_DATABASE_URL points at.
 if not config.get_main_option("sqlalchemy.url", None):
-    config.set_main_option("sqlalchemy.url", settings.database_url)
+    config.set_main_option("sqlalchemy.url", settings.normalised_database_url)
 
 # Logging is only configured when Alembic is driven from the command line.
 # When the API applies migrations in process at startup, it passes

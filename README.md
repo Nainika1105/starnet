@@ -340,7 +340,30 @@ rather than one per restart:
 The last one is the only check you might legitimately override — set it
 deliberately if `STARNET_MEDIA_ROOT` is a genuinely persistent mounted disk.
 
-### 1. Database and storage (Supabase)
+### Quickest: Render, from the blueprint
+
+`render.yaml` in the repository root describes the whole thing. In Render:
+**New → Blueprint → pick this repository.** It creates the web service and a
+Postgres database with every setting wired, including a generated JWT secret.
+Nothing to fill in by hand.
+
+What that deploys is the **demo** configuration — a deliberate middle ground:
+
+| | |
+| --- | --- |
+| `STARNET_ENVIRONMENT=demo` | Still refuses a guessable JWT secret, because the URL is public |
+| Seeded accounts | Allowed, and the point: whoever opens the link needs data and an account |
+| `STARNET_STORAGE_BACKEND=db` | Photos in Postgres, because a free instance's disk is wiped on redeploy and a demo whose images all 404 shows nothing |
+| CORS | Empty, and correctly so — the dashboard is served from the same host, and same-origin requests do not use CORS |
+
+The free tier sleeps when idle, so the first visit after a quiet spell takes
+around 30 seconds. The free Postgres expires after 30 days.
+
+For a real deployment set `STARNET_ENVIRONMENT=production`,
+`STARNET_STORAGE_BACKEND=s3` with object-storage credentials, and turn the seed
+off — the app refuses to start otherwise, which is the intent.
+
+### Alternative: Supabase for the database
 
 Create a project, then a **private** storage bucket for the photos. PostGIS
 ships enabled, but the app runs `CREATE EXTENSION IF NOT EXISTS postgis` at
