@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     # which fly.toml also configures, making this a no-op there.
     migrate_on_startup: bool = True
 
+    # --- redemptions ------------------------------------------------------
+    # Points are not money and are never exchanged for it. Redemptions deduct
+    # points and record the choice; nothing is issued and no provider is
+    # called. This cannot be switched off and still work -- no real fulfilment
+    # backend exists, so `fulfilment.fulfil` raises and the production guard
+    # refuses to boot. See app/fulfilment.py.
+    payments_simulated: bool = True
+
     # --- photo storage ----------------------------------------------------
     # "local" (a directory served at /media) or "s3" (any S3-compatible store:
     # AWS, Supabase Storage, Cloudflare R2, MinIO).
@@ -95,6 +103,13 @@ class Settings(BaseSettings):
             problems.append(
                 "STARNET_CORS_ORIGINS is empty, which would fall back to localhost. "
                 "Set it to the dashboard's real origin."
+            )
+        if not self.payments_simulated:
+            problems.append(
+                "STARNET_PAYMENTS_SIMULATED is false, but no real fulfilment "
+                "backend is implemented, so redemptions would report success "
+                "while issuing nothing. Points in this system are not money. "
+                "Implement app/fulfilment.py before changing this."
             )
         if self.storage_backend.strip().lower() == "local":
             problems.append(

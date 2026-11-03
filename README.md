@@ -81,7 +81,7 @@ cd ../api && STARNET_SEED_ON_STARTUP=true ./.venv/bin/uvicorn app.main:app --rel
 cd api && ./.venv/bin/python -m pytest tests/ -q
 ```
 
-161 tests. The ones that touch the database need Postgres; the config, signal, storage and rate-limit tests are pure and run without it.
+169 tests. The ones that touch the database need Postgres; the config, signal, storage and rate-limit tests are pure and run without it.
 
 | File | Covers |
 | --- | --- |
@@ -95,6 +95,7 @@ cd api && ./.venv/bin/python -m pytest tests/ -q
 | `test_ratelimit.py` | The credential limits: window sliding, bounded key space, thread safety, that a spoofable header is not trusted, and that an unknown address costs the same work as a known one |
 | `test_collusion.py` | The take-turns ring, and the honest patterns that resemble it: a prolific volunteer, two neighbours on one street, and the first users of a small deployment |
 | `test_imagecheck.py` | Photo re-use: what the perceptual hash must match (re-encoding, resizing, blur) and must not (different photographs), plus the crop it cannot catch |
+| `test_fulfilment.py` | That redemptions are simulated and cannot quietly stop being: the flag fails loudly, production refuses to boot without it, and no payment dependency is installed |
 
 ---
 
@@ -201,6 +202,28 @@ useful for seeing what each mechanism is actually buying.
 for a correct report. Every coefficient lives in [`api/app/config.py`](api/app/config.py) and is
 overridable by a `STARNET_`-prefixed environment variable.
 
+### Points are not money
+
+Nothing in this system touches real money, and that is enforced rather than
+merely true today:
+
+- Redeeming deducts points and records the choice. No voucher, credit or
+  payment is issued, and no provider is called.
+- `STARNET_PAYMENTS_SIMULATED` cannot be switched off and still work —
+  `fulfilment.fulfil` raises, because no real backend exists, so going live
+  would have to be a deliberate piece of work rather than a config change. The
+  production boot guard refuses it too: an instance reporting successful
+  redemptions while issuing nothing is worse than one that will not start.
+- Every redemption records `simulated: true` and a `SIM-…` reference on the row
+  and in the API response, so a client cannot present one as delivered.
+- The catalogue descriptions say so. "Rs. 50 off your water bill" reads like
+  real value, and a demo audience should not have to guess which parts are
+  pretend.
+- No payment SDK is in `requirements.txt`, and a test asserts none appears.
+
+The seam for real fulfilment is `app/fulfilment.py`. The ledger arithmetic,
+idempotency keys and balances are identical either way.
+
 ### The ledger
 
 The ledger is the part that has to be right, so it holds three invariants:
@@ -263,7 +286,7 @@ Each is isolated behind a function or flag so the real version drops in without 
 | Base rates for exposure, vulnerability, escalation and `ρ̂(ℓ)` — per-ward and per-category constants | `engines/priority.py` | Traffic counts, POI lookups for schools and hospitals, weather-aware escalation. (The escalation term's growth with age is computed, not a constant.) |
 | Device fingerprinting — the client supplies the value, so it is trusted input | `models.py: User.device_fingerprint` | Attested device identity, or at least a fingerprint derived server-side |
 | Photo storage — local volume | `app/storage.py` | S3 or Supabase storage behind the same `save`/`url_for` interface |
-| Redemption catalogue — static list | `app/catalog.py` | Partner coupon and municipal credit integrations |
+| Redemption catalogue — static list, and fulfilment is simulated by design | `app/catalog.py`, `app/fulfilment.py` | Partner coupon and municipal credit integrations. Simulation is enforced, not incidental — see **Points are not money** |
 | Notifications — in-app only | — | FCM |
 | Background work — APScheduler in-process | `app/jobs.py` | Celery + Redis |
 

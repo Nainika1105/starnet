@@ -240,6 +240,11 @@ class Redemption(Base):
     item_sku: Mapped[str] = mapped_column(String(64))
     item_name: Mapped[str] = mapped_column(String(255))
     points_spent: Mapped[Decimal] = mapped_column(POINTS)
+    # Recorded on the row itself, so neither a user nor an auditor can mistake
+    # a simulated redemption for a delivered one. Points are not money in this
+    # system and nothing is issued; see app/fulfilment.py.
+    simulated: Mapped[bool] = mapped_column(Boolean, default=True)
+    fulfilment_reference: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

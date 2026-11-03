@@ -164,6 +164,10 @@ class RedeemIn(BaseModel):
 
 
 class RedeemOut(BaseModel):
+    # Points are not money in this system. Surfaced on the response so a
+    # client cannot present a simulated redemption as a delivered one.
+    simulated: bool = True
+    fulfilment_reference: str | None = None
     ok: bool
     balance: Decimal
     message: str

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import fulfilment
 from app.auth import current_user
 from app.catalog import BY_SKU, CATALOG
 from app.db import get_db
@@ -110,12 +111,27 @@ def redeem(
             message="Already redeemed (duplicate request ignored).",
         )
 
+    # Deliberately after the ledger entry, not before. Points are not money
+    # here and nothing is issued, so there is no provider call that could
+    # succeed while the deduction failed -- and if a real backend is ever
+    # written, this ordering is the one to revisit first.
+    delivery = fulfilment.fulfil(user_id=user.id, sku=item.sku, cost=item.cost)
+
     db.add(
         Redemption(
-            user_id=user.id, item_sku=item.sku, item_name=item.name, points_spent=item.cost
+            user_id=user.id,
+            item_sku=item.sku,
+            item_name=item.name,
+            points_spent=item.cost,
+            simulated=delivery.simulated,
+            fulfilment_reference=delivery.reference,
         )
     )
     db.commit()
     return RedeemOut(
-        ok=True, balance=reward.balance(db, user.id), message=f"Redeemed {item.name}."
+        ok=True,
+        balance=reward.balance(db, user.id),
+        message=f"Redeemed {item.name}. {delivery.description}",
+        simulated=delivery.simulated,
+        fulfilment_reference=delivery.reference,
     )
