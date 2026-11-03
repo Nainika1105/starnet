@@ -81,7 +81,7 @@ cd ../api && STARNET_SEED_ON_STARTUP=true ./.venv/bin/uvicorn app.main:app --rel
 cd api && ./.venv/bin/python -m pytest tests/ -q
 ```
 
-140 tests. The ones that touch the database need Postgres; the config, signal, storage and rate-limit tests are pure and run without it.
+161 tests. The ones that touch the database need Postgres; the config, signal, storage and rate-limit tests are pure and run without it.
 
 | File | Covers |
 | --- | --- |
@@ -94,6 +94,7 @@ cd api && ./.venv/bin/python -m pytest tests/ -q
 | `test_migrations.py` | That the migrations build the schema from a bare database, that the models have not drifted from them, and that applying them does not silence the app's logging |
 | `test_ratelimit.py` | The credential limits: window sliding, bounded key space, thread safety, that a spoofable header is not trusted, and that an unknown address costs the same work as a known one |
 | `test_collusion.py` | The take-turns ring, and the honest patterns that resemble it: a prolific volunteer, two neighbours on one street, and the first users of a small deployment |
+| `test_imagecheck.py` | Photo re-use: what the perceptual hash must match (re-encoding, resizing, blur) and must not (different photographs), plus the crop it cannot catch |
 
 ---
 
@@ -111,21 +112,28 @@ cd api && ./.venv/bin/python -m pytest tests/ -q
 
 1. **Report** — photo, GPS, timestamp, category. Live camera only; there is deliberately no
    gallery picker in the mobile app.
-2. **Confidence** `C(r) = σ(w₀ + w₁s_img + w₂s_geo + w₃s_cor + w₄τ)`.
+2. **Photo re-use** — every photo is perceptually hashed and compared against
+   what has been submitted before. Re-using one picture as several faults is
+   the cheapest fabrication available: the live-camera rule is UI enforcement
+   only, EXIF can be stripped or forged, and a screenshot defeats both — but
+   none of that changes the pixels. A match discounts the image evidence rather
+   than rejecting the report, weighted hardest when it is the same account,
+   because one photograph submitted as several faults has no innocent reading.
+3. **Confidence** `C(r) = σ(w₀ + w₁s_img + w₂s_geo + w₃s_cor + w₄τ)`.
    `C ≥ θ_hi` auto-accepts, `C < θ_lo` rejects, in between routes a verify task to a trusted user.
    In practice a lone uncorroborated report from an ordinary account lands in the middle band —
    that is the design, not a tuning accident.
-3. **Cluster** — a nearby report of the same category joins the existing issue as corroboration,
+4. **Cluster** — a nearby report of the same category joins the existing issue as corroboration,
    which raises its confidence and can carry it over `θ_hi` with no verifier needed. Duplicates
    are never deleted. A report matching an issue the city has already signed off **reopens** it.
-4. **Prioritise** — `P(I) = Σ λᵢxᵢ` over severity, exposure, vulnerability and escalation risk,
+5. **Prioritise** — `P(I) = Σ λᵢxᵢ` over severity, exposure, vulnerability and escalation risk,
    times an equity multiplier `E(ℓ)` that favours under-reported wards. The escalation term grows
    with the issue's age, so a neglected fault climbs the queue by itself.
-5. **Dispatch & resolve** — the admin assigns a crew and marks the work done.
-6. **Fix-confirm** — the *system* picks a nearby high-trust user who is not a reporter, not a
+6. **Dispatch & resolve** — the admin assigns a crew and marks the work done.
+7. **Fix-confirm** — the *system* picks a nearby high-trust user who is not a reporter, not a
    contributor in any role, and not chosen by the contractor. They must submit a photo. No
    confirmation inside the window, or a "still broken" verdict, reopens the issue.
-7. **Settle** — reward vests across the three stages.
+8. **Settle** — reward vests across the three stages.
 
 ### Who may do what
 
@@ -227,6 +235,12 @@ system-selected fix-confirmation with photo requirement · wallet with per-stage
 visibility · redemption catalogue · ward accountability metrics · per-user rate caps · mobile app
 and municipal dashboard · seed data and a one-command run.
 
+**Phase 3.** The collusion graph, with a routing veto that stops a settler
+paying their own long-standing partner · an evidence floor on trust tiers, so a
+single confirmed report no longer grants the right to release somebody else's
+45% · perceptual hashing of every photo, so re-using one picture as several
+faults discounts the evidence.
+
 **Phase 2.** The logistic confidence fusion, on by default · geo coherence from the photo's own
 EXIF capture time and GPS, with a distance-scaled penalty · impossible-travel detection between a
 user's consecutive reports · geo+time clustering, on by default, with reopen-on-re-report ·
@@ -242,7 +256,8 @@ Each is isolated behind a function or flag so the real version drops in without 
 
 | Stub | Where | Real version |
 | --- | --- | --- |
-| `s_img` — per-category constant, does not look at the image | `engines/confidence.py: score_image` | CLIP zero-shot, then YOLO fine-tuned on RDD2022 |
+| `s_img`'s *semantic* half — "is there actually a pothole in this photo?" is still a per-category constant | `engines/confidence.py: score_image` | CLIP zero-shot, then YOLO fine-tuned on RDD2022. Needs ~1.2 GB of dependencies and more memory than the configured 512 MB machine, so it wants a bigger instance or a hosted inference endpoint |
+| Perceptual hashing cannot detect a **cropped** re-use | `engines/imagecheck.py` | DCT-based pHash, which is far more crop-robust; needs numpy or scipy for the transform |
 | Notifications of a routed task — the user has to open the Tasks tab | `routers/tasks.py` | Push, so a verify task reaches someone while they are still near the spot |
 | Clustering predicate — same category, within 30 m, inside 48 h | `routers/reports.py: find_cluster_match` | HDBSCAN over a combined distance that adds CLIP embedding similarity to the metres, so two photos of one pothole from opposite kerbs cluster and two faults at one junction do not |
 | Base rates for exposure, vulnerability, escalation and `ρ̂(ℓ)` — per-ward and per-category constants | `engines/priority.py` | Traffic counts, POI lookups for schools and hospitals, weather-aware escalation. (The escalation term's growth with age is computed, not a constant.) |

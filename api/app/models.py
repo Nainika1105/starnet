@@ -135,6 +135,10 @@ class Report(Base):
     exif_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     photo_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     photo_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 64-bit perceptual hash as 16 hex characters, for detecting a photo
+    # submitted more than once. Hex rather than BIGINT because the top bit is
+    # meaningful and Postgres integers are signed.
+    photo_hash: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
     submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     s_img: Mapped[float] = mapped_column(Float, default=0.0)

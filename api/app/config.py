@@ -178,6 +178,26 @@ class Settings(BaseSettings):
     cluster_window_hours: float = 48.0
     clustering_enabled: bool = True
 
+    # --- photo re-use (s_img) ---------------------------------------------
+    # Hamming distance between two 64-bit difference hashes below which the
+    # images are treated as the same photograph.
+    #
+    # Measured, the two cases form clear clusters: the same photo after
+    # re-encoding, resizing or blurring lands at 0-2 bits, while unrelated
+    # photographs start at 10. Six sits in the middle of that gap rather than
+    # at either edge, which is where a threshold between two clusters belongs:
+    # four bits of headroom above every true positive and four below the
+    # closest false positive. See engines/imagecheck.py for the figures.
+    photo_hash_max_distance: int = 6
+    photo_reuse_window_days: float = 365.0
+    # Re-use by the same account has no innocent reading: one photograph
+    # submitted as several faults is the fabrication this catches. The same
+    # image from two accounts does have innocent readings -- a widely shared
+    # photo, a screenshot passed round a neighbourhood group -- so it costs
+    # less.
+    photo_reuse_same_reporter_weight: float = 1.0
+    photo_reuse_other_reporter_weight: float = 0.6
+
     # --- geo plausibility -------------------------------------------------
     # How far the photo's own EXIF GPS may sit from the claimed location before
     # it stops corroborating it. Consumer GPS is routinely 20-30 m out, so this

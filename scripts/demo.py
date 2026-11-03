@@ -26,7 +26,7 @@ from decimal import Decimal
 from fractions import Fraction
 
 import httpx
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 ADMIN = ("admin@starnet.demo", "starnet123")
 PASSWORD = "starnet123"
@@ -48,6 +48,10 @@ CITIZENS = [
 BASE_LAT, BASE_LNG = 12.9705, 77.5921
 LAT = BASE_LAT + random.uniform(-0.004, 0.004)
 LNG = BASE_LNG + random.uniform(-0.004, 0.004)
+
+# Seeded once per run, so this run's photos are visually distinct from the last
+# run's and the server does not -- rightly -- score them as a re-used image.
+RUN_RNG = random.Random()
 
 
 def rule(title: str) -> None:
@@ -72,9 +76,29 @@ def photo_bytes(label: str, *, lat: float = LAT, lng: float = LNG) -> bytes:
     no EXIF as a re-encoded or borrowed image, and from a brand-new account that
     is enough on its own to fall under theta_lo. The mobile app asks the camera
     for EXIF for exactly this reason, so the demo sends what the app sends.
+
+    The texture is unique per run, which also is not decoration. The server
+    perceptually hashes every photo and discounts one it has seen before, so a
+    demo that posted the same bytes every time would be flagged as re-using a
+    photograph -- correctly, since that is exactly what it would be doing. A
+    real camera never produces identical pixels twice.
     """
     img = Image.new("RGB", (640, 480), (90, 95, 105))
+    pixels = img.load()
+    for y in range(0, 480, 8):
+        for x in range(0, 640, 8):
+            shade = (
+                RUN_RNG.randint(60, 150),
+                RUN_RNG.randint(60, 150),
+                RUN_RNG.randint(70, 160),
+            )
+            for dy in range(8):
+                for dx in range(8):
+                    pixels[x + dx, y + dy] = shade
+    img = img.filter(ImageFilter.GaussianBlur(5))
+
     draw = ImageDraw.Draw(img)
+    draw.ellipse([180, 150, 470, 360], fill=(28, 28, 32))
     draw.rectangle([30, 30, 610, 450], outline=(240, 240, 240), width=4)
     draw.text((56, 60), f"DEMO PHOTO\n{label}", fill=(245, 245, 245))
 

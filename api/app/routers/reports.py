@@ -13,6 +13,7 @@ from app.config import settings
 from app.db import get_db
 from app.engines import collusion
 from app.engines import confidence as conf
+from app.engines import imagecheck
 from app.engines import priority as priority_engine
 from app.engines import reward, trust
 from app.engines.geo import in_service_area, ward_for, wkt_point
@@ -77,6 +78,25 @@ def last_report_position(db: Session, user: User) -> tuple[float | None, float |
     return previous.lat, previous.lng, previous.submitted_at
 
 
+def _photo_reuse(db: Session, photo_hash: str | None, user: User):
+    """How much this photo has been seen before, and where.
+
+    The reporter's own history is checked first and weighted hardest: one
+    photograph submitted as several different faults has no innocent reading,
+    and it is the cheapest fabrication available -- the live-camera rule is UI
+    enforcement, EXIF can be stripped, but the pixels do not change.
+    """
+    if not photo_hash:
+        return 0.0, []
+
+    own = imagecheck.find_reuse(db, photo_hash, reporter_id=user.id)
+    if own:
+        return imagecheck.reuse_signal(own, by_same_reporter=True), own
+
+    others = imagecheck.find_reuse(db, photo_hash)
+    return imagecheck.reuse_signal(others, by_same_reporter=False), others
+
+
 def find_cluster_match(db: Session, *, category: Category, lat: float, lng: float) -> Issue | None:
     """Dedup -> corroboration (section 6).
 
@@ -129,17 +149,24 @@ async def create_report(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Location is outside the serviced area")
 
     photo_key = None
+    photo_hash = None
     meta = storage.PhotoMeta()
     if photo is not None:
         raw = await photo.read()
         # Read what the geo check needs, then store the image stripped of the rest.
         meta = storage.read_photo_meta(raw)
+        photo_hash = imagecheck.perceptual_hash(raw)
         photo_key = storage.save(raw)
 
     submitted_at = utcnow()
     previous_lat, previous_lng, previous_at = last_report_position(db, user)
 
     s_img = conf.score_image(category, photo_key)
+    reuse, reuse_matches = _photo_reuse(db, photo_hash, user)
+    # Discounts the image evidence rather than rejecting the report: a re-used
+    # photo makes the submission weaker evidence, and the decision of what to
+    # do about that belongs to the confidence thresholds, not to this check.
+    s_img *= 1.0 - reuse
     s_geo = conf.score_geo(
         lat=lat,
         lng=lng,
@@ -164,6 +191,7 @@ async def create_report(
             description=description,
             photo_key=photo_key,
             meta=meta,
+            photo_hash=photo_hash,
             s_img=s_img,
             s_geo=s_geo,
             submitted_at=submitted_at,
@@ -206,12 +234,24 @@ async def create_report(
             exif_time=meta.captured_at,
             photo_lat=meta.lat,
             photo_lng=meta.lng,
+            photo_hash=photo_hash,
             submitted_at=submitted_at,
             s_img=s_img,
             s_geo=s_geo,
             independence_weight=1.0,
         )
     )
+    if reuse_matches:
+        lifecycle.log_event(
+            db,
+            issue,
+            "PHOTO_REUSE_DETECTED",
+            actor_id=user.id,
+            matches=len(reuse_matches),
+            closest_bits=reuse_matches[0].distance,
+            same_reporter=reuse_matches[0].reporter_id == user.id,
+            s_img_penalty=round(reuse, 4),
+        )
     lifecycle.log_event(
         db,
         issue,
@@ -259,6 +299,7 @@ def _attach_as_corroboration(
     description: str | None,
     photo_key: str | None,
     meta: storage.PhotoMeta,
+    photo_hash: str | None,
     s_img: float,
     s_geo: float,
     submitted_at,
@@ -300,6 +341,7 @@ def _attach_as_corroboration(
             exif_time=meta.captured_at,
             photo_lat=meta.lat,
             photo_lng=meta.lng,
+            photo_hash=photo_hash,
             submitted_at=submitted_at,
             s_img=s_img,
             s_geo=s_geo,
