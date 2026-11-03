@@ -35,6 +35,12 @@ def _ensure_database() -> None:
 def database():
     """Set up the throwaway schema once.
 
+    Built with `create_all` rather than by running the migrations, because it
+    is markedly faster and these tests are about behaviour, not DDL. That does
+    leave a gap -- the schema under test is the models', not the migrations' --
+    and `test_migrations.py` is what closes it: it builds a database from the
+    migrations alone and fails if the two have drifted apart.
+
     Requested through `db` rather than autouse, so the tests that are pure
     functions of config or arithmetic do not need Postgres running to execute.
     """

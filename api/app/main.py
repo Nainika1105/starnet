@@ -4,15 +4,15 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text
 
 from app import models  # noqa: F401  (registers the mapped classes)
 from app.config import settings
-from app.db import Base, engine
 from app.jobs import (
     expire_stale_confirmations,
     expire_stale_verifications,
@@ -27,9 +27,32 @@ scheduler = BackgroundScheduler()
 
 
 def init_db() -> None:
-    with engine.begin() as conn:
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
-    Base.metadata.create_all(bind=engine)
+    """Bring the schema up to date.
+
+    Migrations, not `create_all`. create_all builds a correct schema on an
+    empty database and then silently does nothing forever: it cannot add a
+    column, widen a numeric, or create an enum value on a database that already
+    has tables. For a ledger whose precision is load-bearing, "silently does
+    nothing" is the wrong failure mode.
+
+    A database created by the old create_all path has no alembic_version table,
+    so `upgrade` would try to create tables that already exist. Stamp it once:
+
+        alembic stamp head
+    """
+    if not settings.migrate_on_startup:
+        log.info("Skipping migrations (STARNET_MIGRATE_ON_STARTUP=false)")
+        return
+
+    root = Path(__file__).resolve().parent.parent
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "migrations"))
+    config.set_main_option("sqlalchemy.url", settings.database_url)
+    # Leave this process's logging alone -- alembic.ini configures the root
+    # logger at WARNING, which would silence the app's own INFO output for the
+    # rest of its life. See the note in migrations/env.py.
+    config.attributes["configure_logger"] = False
+    command.upgrade(config, "head")
 
 
 def check_production_config() -> None:

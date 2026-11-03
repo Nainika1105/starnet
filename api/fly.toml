@@ -12,6 +12,13 @@ kill_timeout = "30s"
 [build]
   dockerfile = "Dockerfile"
 
+# Migrations run once here, before the new machines take traffic, rather than
+# racing N booting instances. STARNET_MIGRATE_ON_STARTUP stays true as a
+# belt-and-braces default -- by the time a machine boots this has already run,
+# so `upgrade head` finds nothing to do.
+[deploy]
+  release_command = "alembic upgrade head"
+
 [env]
   STARNET_ENVIRONMENT = "production"
   STARNET_SEED_ON_STARTUP = "false"

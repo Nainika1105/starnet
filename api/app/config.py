@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     jwt_ttl_minutes: int = 60 * 24 * 7
     seed_on_startup: bool = False
 
+    # Apply pending Alembic migrations when the API boots. Safe here because
+    # the deployment runs a single instance (see fly.toml); with several
+    # instances this races, and migrations belong in a release step instead --
+    # which fly.toml also configures, making this a no-op there.
+    migrate_on_startup: bool = True
+
     # --- photo storage ----------------------------------------------------
     # "local" (a directory served at /media) or "s3" (any S3-compatible store:
     # AWS, Supabase Storage, Cloudflare R2, MinIO).

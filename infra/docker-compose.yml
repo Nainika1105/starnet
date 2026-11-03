@@ -15,11 +15,13 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     healthcheck:
-      # On a first run the entrypoint brings up a temporary server to create
-      # the database, and plain pg_isready answers for that one -- so the API
-      # can be let through seconds before the real server is listening. The
-      # query makes the check prove it is talking to the actual instance.
-      test: ["CMD-SHELL", "psql -U starnet -d starnet -c 'SELECT 1' > /dev/null 2>&1"]
+      # -h 127.0.0.1 is the point. On a first run the entrypoint starts a
+      # temporary server to create the database, and that server listens on the
+      # Unix socket only (listen_addresses=''). A socket-based check passes
+      # against it, the API is let through, and then the real server restarts
+      # and refuses the connection. Forcing TCP means the check can only pass
+      # once the server the API will actually use is accepting connections.
+      test: ["CMD-SHELL", "psql -h 127.0.0.1 -U starnet -d starnet -c 'SELECT 1' > /dev/null 2>&1"]
       interval: 3s
       timeout: 5s
       retries: 30

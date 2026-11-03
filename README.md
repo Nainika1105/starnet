@@ -81,7 +81,7 @@ cd ../api && STARNET_SEED_ON_STARTUP=true ./.venv/bin/uvicorn app.main:app --rel
 cd api && ./.venv/bin/python -m pytest tests/ -q
 ```
 
-89 tests. The ones that touch the database need Postgres; the config, signal and storage tests are pure and run without it.
+94 tests. The ones that touch the database need Postgres; the config, signal and storage tests are pure and run without it.
 
 | File | Covers |
 | --- | --- |
@@ -91,6 +91,7 @@ cd api && ./.venv/bin/python -m pytest tests/ -q
 | `test_clustering.py` | Dedup → corroboration through the real HTTP endpoint, and reopen-on-re-report with its ledger reversal |
 | `test_storage.py` | That the stored photo carries none of the EXIF read off the upload, and both storage backends' contracts |
 | `test_config_guard.py` | That an unsafe production configuration refuses to boot |
+| `test_migrations.py` | That the migrations build the schema from a bare database, that the models have not drifted from them, and that applying them does not silence the app's logging |
 
 ---
 
@@ -325,21 +326,44 @@ Point `expo.extra.apiBase` in `mobile/app.json` at the deployed API and run
 `npx expo start`. App-store distribution is a separate track — it needs EAS
 Build plus Apple and Google developer accounts, and is not configured here.
 
+### Schema changes
+
+Alembic, not `create_all`. `create_all` builds a correct schema on an empty
+database and then silently does nothing forever: it cannot add a column, widen
+a numeric or add an enum value to a database that already has tables. For a
+ledger whose precision is load-bearing, "silently does nothing" is the wrong
+failure mode.
+
+```bash
+cd api
+alembic revision --autogenerate -m "what changed"   # after editing models.py
+alembic upgrade head
+```
+
+The initial revision installs PostGIS itself, so `upgrade head` works against
+the bare database a managed Postgres hands you. Migrations run in three places,
+and the last two are no-ops once the first has run: Fly's `release_command`
+before new machines take traffic, the API at startup (single instance, so no
+race), and by hand.
+
+A test guards the thing that actually rots migration chains — a model change
+with no revision. It builds a database from the migrations alone and fails if
+autogenerate would still find a difference. If you see that failure, you
+changed a model and did not generate the revision.
+
+If you have a database created by the old `create_all` path, it has no
+`alembic_version` table, so `upgrade` would try to create tables that exist.
+Stamp it once: `alembic stamp head`.
+
 ### Before you call it production
 
-Two things are still missing, and both are real:
-
-- **No migrations.** Schema is created with SQLAlchemy's `create_all`, which
-  builds a fresh database correctly but cannot alter an existing one. The next
-  schema change needs Alembic, or it needs the database rebuilt. This is the
-  first thing to fix after a first deploy.
 - **No rate limiting at the edge.** The per-user report caps are enforced in
   the app, but there is nothing in front of `/auth/login` to slow password
   guessing. Fly can do this, or put a proxy in front.
-
-Beyond that: no error tracking, no backups configured beyond whatever the
-database provider does by default, and the trust and confidence coefficients
-are reasoned rather than fitted to real reports.
+- **No error tracking and no backups** beyond whatever the database provider
+  does by default.
+- The trust and confidence coefficients are reasoned rather than fitted to real
+  reports, and `s_img` is still a constant.
 
 ---
 
