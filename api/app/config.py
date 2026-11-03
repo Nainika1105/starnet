@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # which fly.toml also configures, making this a no-op there.
     migrate_on_startup: bool = True
 
+    # Path to the dashboard's built assets. When set, the API serves them at
+    # "/" so a single host answers for both, which means one URL to share and
+    # no CORS to configure. Empty means the API serves only its own API, with
+    # the dashboard running separately on the Vite dev server.
+    dashboard_dir: str = ""
+
     # --- redemptions ------------------------------------------------------
     # Points are not money and are never exchanged for it. Redemptions deduct
     # points and record the choice; nothing is issued and no provider is

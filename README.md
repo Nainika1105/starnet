@@ -20,13 +20,27 @@ and what is stubbed.
 cd infra && docker compose up --build
 ```
 
-Then:
+That is the whole thing: one command, two containers, and **one URL**.
 
 | Surface | URL | Sign in |
 | --- | --- | --- |
-| Municipal dashboard | http://localhost:5173 | `admin@starnet.demo` / `starnet123` |
+| Municipal dashboard | **http://localhost:8000** | `admin@starnet.demo` / `starnet123` |
 | API docs (OpenAPI) | http://localhost:8000/docs | — |
 | Mechanism knobs | http://localhost:8000/config/mechanism | — |
+
+The API image builds the dashboard and serves it at `/`, so one host answers
+for both. That means one link to open or share and no CORS to configure —
+`VITE_API_BASE` is empty in the image, which tells the dashboard to call the
+same origin it was served from.
+
+For front-end work there is still a Vite dev server with hot reload, behind a
+profile so it does not start by default:
+
+```bash
+cd infra && docker compose up admin
+```
+
+It serves on http://localhost:5173 and talks to the API on 8000.
 
 The database is seeded on first start with six demo accounts and eight issues spread across the
 lifecycle, so the dashboard opens with work in every state.

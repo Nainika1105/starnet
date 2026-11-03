@@ -1,4 +1,9 @@
-const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+// An empty VITE_API_BASE means "same origin as this page", which is how the
+// API serves the built dashboard: one host, one link, no CORS to configure.
+// Unset (undefined) keeps the local dev default, where Vite serves the
+// dashboard on 5173 and the API runs separately on 8000.
+const RAW = import.meta.env.VITE_API_BASE
+const BASE = RAW === undefined ? 'http://localhost:8000' : RAW
 
 const TOKEN_KEY = 'starnet.admin.token'
 

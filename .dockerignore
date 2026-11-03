@@ -1,0 +1,14 @@
+# The build context is the repository root (the API image builds the dashboard
+# too), so keep the heavy, regenerable directories out of it.
+.git/
+**/.venv/
+**/venv/
+**/node_modules/
+**/dist/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+api/media/
+**/.env
+**/.env.local
+.DS_Store

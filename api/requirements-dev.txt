@@ -1,0 +1,8 @@
+# Development and test tooling. NOT installed in the deployed image --
+# api/Dockerfile installs requirements.txt only, which keeps moto and its
+# dependencies out of production.
+-r requirements.txt
+pytest==8.3.4
+# A real HTTP S3 implementation, so the object-storage backend is tested
+# over the wire rather than against a stand-in client.
+moto[server]==5.0.22

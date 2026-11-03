@@ -153,6 +153,28 @@ if settings.storage_backend.strip().lower() != "s3":
     app.mount("/media", StaticFiles(directory=settings.media_root), name="media")
 
 
+def mount_dashboard() -> None:
+    """Serve the built dashboard from this app, when it is present.
+
+    Mounted last and at "/", so every API route above still wins; what falls
+    through is a dashboard path. `html=True` makes unknown paths return
+    index.html, which is what a single-page app needs.
+
+    This is what lets one URL serve the whole demo. Without it the dashboard is
+    a separate origin and needs its own host and its own CORS entry.
+    """
+    directory = settings.dashboard_dir.strip()
+    if not directory:
+        return
+    path = Path(directory)
+    if not (path / "index.html").exists():
+        log.warning("STARNET_DASHBOARD_DIR=%s has no index.html; not serving it", directory)
+        return
+
+    app.mount("/", StaticFiles(directory=str(path), html=True), name="dashboard")
+    log.info("Serving the dashboard from %s", path)
+
+
 @app.get("/health", tags=["meta"])
 def health() -> dict:
     return {"status": "ok"}
@@ -199,3 +221,8 @@ def mechanism_config() -> dict:
         },
         "max_fabrication_payout_fraction": settings.g_verification * settings.f_discoverer,
     }
+
+
+# Registered last on purpose: a StaticFiles mount at "/" would otherwise
+# shadow routes declared after it.
+mount_dashboard()

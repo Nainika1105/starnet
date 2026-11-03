@@ -29,7 +29,10 @@ services:
 
   api:
     build:
-      context: ../api
+      # The repository root, because the image also builds the dashboard it
+      # serves. One container, one URL, no CORS to configure.
+      context: ..
+      dockerfile: api/Dockerfile
     environment:
       STARNET_DATABASE_URL: postgresql+psycopg://starnet:starnet@db:5432/starnet
       STARNET_JWT_SECRET: dev-secret-change-me
@@ -46,11 +49,14 @@ services:
       db:
         condition: service_healthy
 
+  # Optional, for front-end work only: the Vite dev server with hot reload on
+  # port 5173, talking to the API on 8000. The API already serves a built copy
+  # of this dashboard at http://localhost:8000, which is the one to open or
+  # share. Start it explicitly: docker compose up admin
   admin:
+    profiles: ["dev"]
     build:
       context: ../admin
-      # The dev server, for local work only. The production image is the
-      # Dockerfile's default target: a static build served by nginx.
       target: dev
     environment:
       VITE_API_BASE: http://localhost:8000
