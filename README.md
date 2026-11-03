@@ -376,8 +376,14 @@ What that deploys is the **demo** configuration — a deliberate middle ground:
 | `STARNET_STORAGE_BACKEND=db` | Photos in Postgres, because a free instance's disk is wiped on redeploy and a demo whose images all 404 shows nothing |
 | CORS | Empty, and correctly so — the dashboard is served from the same host, and same-origin requests do not use CORS |
 
-The free tier sleeps when idle, so the first visit after a quiet spell takes
-around 30 seconds. The free Postgres expires after 30 days.
+Two free-tier facts worth knowing. The web service **sleeps after 15 minutes
+idle**, so the first visit after a quiet spell takes 30–50 seconds — open it
+yourself a minute before showing it to anyone. And a free Postgres **expires 30
+days after creation**, with a 14-day grace period before deletion. That costs
+nothing here: every account and issue is seeded, so re-applying the blueprint
+gives a fresh database with the same demo in it.
+
+Only one free Postgres can be active per Render workspace.
 
 For a real deployment set `STARNET_ENVIRONMENT=production`,
 `STARNET_STORAGE_BACKEND=s3` with object-storage credentials, and turn the seed

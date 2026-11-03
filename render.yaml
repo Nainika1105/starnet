@@ -22,7 +22,14 @@ databases:
   - name: starnet-db
     databaseName: starnet
     plan: free
+    # 16 matters: PostGIS is only creatable by the database's own user on
+    # PostgreSQL 13 and later. On older versions the first migration fails with
+    # "permission denied to create extension".
     postgresMajorVersion: "16"
+    # Must match the web service's region. Render's private network is
+    # per-region, so a database in another region is not reachable on the
+    # internal connection string this blueprint wires up.
+    region: singapore
 
 services:
   - type: web
