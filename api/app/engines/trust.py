@@ -53,8 +53,27 @@ def trust_of(user: User) -> float:
 
 def tier_of(user: User) -> Tier:
     """Tiers are what the user sees -- the raw score stays internal, so there
-    is no number to reverse-engineer and farm."""
-    tau = trust_of(user)
+    is no number to reverse-engineer and farm.
+
+    A tier needs evidence as well as a score. tau is a ratio, and a ratio from
+    one observation says nothing: one confirmed report alone puts an account at
+    0.667, past the TRUSTED line, which would grant the right to release
+    somebody else's 45% on a single data point. Below `tier_min_evidence` the
+    account stays NEW however good its ratio looks.
+    """
+    # The floor is checked against the RAW counts, not the decayed ones. It
+    # asks "have we observed this account enough to judge it?", and that is a
+    # question about history, which does not un-happen. Decay belongs to the
+    # ratio, where it expresses that old evidence says less about today.
+    #
+    # Using decayed counts here also made the boundary knife-edged: 3.0 decays
+    # to 2.9999999 within a second, so an account would lose the tier it had
+    # just earned.
+    if (user.trust_a + user.trust_b) < settings.tier_min_evidence:
+        return Tier.NEW
+
+    a, b = decayed_counts(user)
+    tau = beta_trust(a, b)
     if tau >= settings.tier_verifier_min:
         return Tier.VERIFIER_ELIGIBLE
     if tau >= settings.tier_trusted_min:

@@ -145,6 +145,34 @@ class Settings(BaseSettings):
     corroboration_s0: float = 1.5
     rho_min: float = 0.05
 
+    # --- collusion graph (section 8) --------------------------------------
+    # Appearing alongside someone a couple of times is a street, not a
+    # conspiracy. Below this many shared issues the pair scores zero, however
+    # concentrated it looks.
+    collusion_min_shared_issues: int = 3
+    # Both accounts need at least this much history before a ratio about them
+    # means anything. Affinity computed from three observations is noise, and
+    # in a small or new deployment EVERYONE looks entangled -- there is nobody
+    # else to have worked with. Without this floor the first users of a system
+    # get flagged for the crime of being early.
+    collusion_min_activity: int = 5
+    # What share of the less-active account's work has to involve the other
+    # before it counts as entanglement. Measured as a ratio, never an absolute
+    # count: two neighbours who genuinely report the same street for years
+    # would look identical to a ring under a raw threshold. What marks a ring
+    # is that the pairing is nearly ALL of what they do.
+    collusion_affinity_threshold: float = 0.5
+    collusion_window_days: float = 90.0
+    # Swapping claim and settle roles -- I report, you confirm, you report, I
+    # confirm -- is the signature of the attack, so it pushes the score most of
+    # the way up on its own.
+    collusion_min_reciprocal_swaps: int = 2
+    collusion_reciprocal_weight: float = 0.75
+    # Above this, a confirmer candidate is not merely down-ranked but refused.
+    # The confirmation slice is 45% of the pool; releasing it is the single
+    # most valuable action in the system, so the bar for who may is high.
+    collusion_routing_veto: float = 0.5
+
     # --- clustering (section 6) ------------------------------------------
     cluster_distance_m: float = 30.0
     cluster_window_hours: float = 48.0
@@ -179,6 +207,15 @@ class Settings(BaseSettings):
     trust_decay_per_week: float = 0.95
     tier_trusted_min: float = 0.60
     tier_verifier_min: float = 0.75
+    # How much evidence a user needs before a tier is granted at all.
+    #
+    # tau is a ratio, and a ratio from one observation is noise: a single
+    # confirmed report puts a brand-new account at (1+1)/(1+0+2) = 0.667, over
+    # the TRUSTED line, which would hand it the right to release other
+    # people's confirmation slice -- 45% of a pool -- on the strength of one
+    # data point. The Beta prior keeps the SCORE honest at low evidence; this
+    # keeps the PRIVILEGES honest too.
+    tier_min_evidence: float = 3.0
 
     # --- anti-abuse (section 8) ------------------------------------------
     max_reports_per_hour: int = 10

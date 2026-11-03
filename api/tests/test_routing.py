@@ -16,17 +16,29 @@ from app.engines import routing, trust
 from app.enums import IssueStatus, Role, TaskStatus, TaskType, Tier, Verdict
 from app.models import Report, Task, utcnow
 
-# Trust counts that land a user in each tier. tau = (a+1)/(a+b+2).
-ELIGIBLE = dict(trust_a=9, trust_b=0)    # 0.909
-TRUSTED = dict(trust_a=2, trust_b=0)     # 0.75 -> also eligible; see below
-MID = dict(trust_a=1, trust_b=0)         # 0.667 -> TRUSTED
-NEW = dict(trust_a=0, trust_b=0)         # 0.5  -> NEW
+# Trust counts that land a user in each tier. tau = (a+1)/(a+b+2), and a tier
+# also needs trust_a + trust_b >= tier_min_evidence, so these carry enough
+# observations to be more than noise.
+ELIGIBLE = dict(trust_a=9, trust_b=0)    # 0.909, evidence 9
+MID = dict(trust_a=3, trust_b=1)         # 0.667, evidence 4 -> TRUSTED
+NEW = dict(trust_a=0, trust_b=0)         # 0.5,   evidence 0 -> NEW
+# A good ratio on too little evidence: still NEW, which is the point.
+UNPROVEN = dict(trust_a=1, trust_b=0)    # 0.667, evidence 1
 
 
 def test_tier_boundaries_are_what_the_config_says(make_user):
     assert trust.tier_of(make_user("a", **NEW)) == Tier.NEW
     assert trust.tier_of(make_user("b", **MID)) == Tier.TRUSTED
     assert trust.tier_of(make_user("c", **ELIGIBLE)) == Tier.VERIFIER_ELIGIBLE
+
+
+def test_a_good_ratio_on_one_observation_grants_nothing(make_user):
+    """One confirmed report puts an account at 0.667, over the TRUSTED line.
+    Granting settlement rights on that would let a single data point unlock
+    somebody else's 45%."""
+    unproven = make_user("unproven", **UNPROVEN)
+    assert trust.trust_of(unproven) >= settings.tier_trusted_min
+    assert trust.tier_of(unproven) == Tier.NEW
 
 
 def test_verifier_is_never_a_reporter(db, make_user, make_issue):
@@ -297,3 +309,17 @@ def _event_types(db, issue) -> list[str]:
             select(IssueEvent.event_type).where(IssueEvent.issue_id == issue.id)
         ).scalars()
     )
+
+
+def test_a_tier_is_not_lost_a_moment_after_it_is_earned(db, make_user):
+    """The evidence floor is checked against raw counts, not decayed ones.
+
+    Decay is continuous, so three observations become 2.9999999 within a
+    second; comparing that against a floor of three would demote an account
+    immediately after it qualified.
+    """
+    user = make_user("just_qualified", trust_a=settings.tier_min_evidence, trust_b=0)
+    assert trust.tier_of(user) != Tier.NEW
+
+    # And the decayed ratio still governs the score itself.
+    assert trust.trust_of(user) < 1.0

@@ -27,7 +27,7 @@ from sqlalchemy import cast, func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.engines import trust
+from app.engines import collusion, trust
 from app.enums import TaskStatus, Tier
 from app.models import Contribution, Issue, Report, Task, User
 
@@ -47,6 +47,9 @@ class Candidate:
     open_tasks: int
     tau: float
     last_seen_at: datetime | None
+    # How entangled this candidate's history is with the people who stand to be
+    # paid on this issue. 0 is a stranger to them; 1 works with nobody else.
+    collusion: float = 0.0
 
     @property
     def bucket(self) -> int:
@@ -55,9 +58,21 @@ class Candidate:
         return int(self.distance_m // DISTANCE_BUCKET_M)
 
     @property
-    def sort_key(self) -> tuple[int, int, float]:
-        # Nearer first, then least loaded, then most trusted.
-        return (self.bucket, self.open_tasks, -self.tau)
+    def vetoed(self) -> bool:
+        return self.collusion >= settings.collusion_routing_veto
+
+    @property
+    def sort_key(self) -> tuple[int, int, int, float]:
+        # Entanglement first, because it is a question of whether this person
+        # should be asked at all; then nearer, then least loaded, then most
+        # trusted. Bucketed to tenths so ordinary proximity still decides
+        # between two candidates who are equally unconnected.
+        return (
+            int(self.collusion * 10),
+            self.bucket,
+            self.open_tasks,
+            -self.tau,
+        )
 
 
 def _last_known_positions(db: Session, issue: Issue):
@@ -129,9 +144,18 @@ def excluded_ids(db: Session, issue: Issue) -> set:
 
 
 def candidates(
-    db: Session, issue: Issue, *, tiers: tuple[Tier, ...], exclude: set | None = None
+    db: Session,
+    issue: Issue,
+    *,
+    tiers: tuple[Tier, ...],
+    exclude: set | None = None,
+    check_collusion: bool = True,
 ) -> list[Candidate]:
+    """Eligible candidates, best first. Vetoed ones are not returned at all."""
     exclude = set(exclude or set()) | excluded_ids(db, issue)
+    # Narrower than the exclusion set: the people a confirmation would PAY.
+    # See collusion.beneficiaries for why a verifier does not belong here.
+    beneficiaries = collusion.beneficiaries(db, issue.id)
 
     positions = _last_known_positions(db, issue)
     loads = _open_task_counts(db)
@@ -142,16 +166,27 @@ def candidates(
     ).scalars():
         if trust.tier_of(user) not in tiers:
             continue
-        distance, last_seen = positions.get(user.id, (None, None))
-        out.append(
-            Candidate(
-                user=user,
-                distance_m=distance,
-                open_tasks=loads.get(user.id, 0),
-                tau=trust.trust_of(user),
-                last_seen_at=last_seen,
-            )
+
+        # Measured against the people who stand to be PAID, because what is
+        # being prevented is a settler releasing money to their own partner.
+        entanglement = (
+            collusion.suspicion_against(db, user.id, beneficiaries)
+            if check_collusion
+            else 0.0
         )
+
+        distance, last_seen = positions.get(user.id, (None, None))
+        candidate = Candidate(
+            user=user,
+            distance_m=distance,
+            open_tasks=loads.get(user.id, 0),
+            tau=trust.trust_of(user),
+            last_seen_at=last_seen,
+            collusion=entanglement,
+        )
+        if candidate.vetoed:
+            continue
+        out.append(candidate)
 
     return sorted(out, key=lambda c: c.sort_key)
 
@@ -177,6 +212,10 @@ def select_confirmer(db: Session, issue: Issue, *, exclude: set | None = None) -
     their final 45%, so refusing to route a confirmation punishes the honest
     reporter for the city's thin verifier coverage. The independence rules are
     not relaxed -- only the tier.
+
+    What is NOT relaxed is the collusion veto. Dropping the tier to find
+    somebody is reasonable; handing the 45% release to the discoverer's
+    long-standing partner is the attack.
     """
     pool = candidates(db, issue, tiers=(Tier.VERIFIER_ELIGIBLE,), exclude=exclude)
     if not pool:

@@ -206,19 +206,28 @@ def score_corroboration(weighted_sum: float) -> float:
 
 def independence_weight(
     *,
-    shared_device: bool = False,
-    flagged_collusion: bool = False,
-    reciprocal_pair: bool = False,
-    temporal_burst: bool = False,
+    shared_device: float = 0.0,
+    flagged_collusion: float = 0.0,
+    reciprocal_pair: float = 0.0,
+    temporal_burst: float = 0.0,
 ) -> float:
     """rho_i = max(rho_min, (1-d)(1-c)(1-p)(1-b)).
 
-    STUB-level inputs in Phase 1 (see anti-abuse); the formula is the real one.
+    Each term is a degree of suspicion in [0, 1], not a flag. Booleans still
+    work -- True is 1.0 -- but the graded form is what the collusion engine
+    produces, and it matters: a pair who share two thirds of their history
+    should count for less than a stranger without counting for nothing, which
+    is all a boolean could express.
+
+    Multiplicative, so independent suspicions compound: a shared device AND a
+    reciprocal history is worse than either, without needing a rule that says
+    so. Floored at rho_min rather than zero, so a discounted corroboration is
+    still evidence -- the mechanism withholds money on confirmation, and does
+    not need to also pretend a report was never filed.
     """
     rho = 1.0
-    for flag in (shared_device, flagged_collusion, reciprocal_pair, temporal_burst):
-        if flag:
-            rho *= 0.0
+    for signal in (shared_device, flagged_collusion, reciprocal_pair, temporal_burst):
+        rho *= 1.0 - max(0.0, min(1.0, float(signal)))
     return max(settings.rho_min, rho)
 
 

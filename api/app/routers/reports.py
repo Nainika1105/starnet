@@ -11,6 +11,7 @@ from app import lifecycle, storage
 from app.auth import current_user
 from app.config import settings
 from app.db import get_db
+from app.engines import collusion
 from app.engines import confidence as conf
 from app.engines import priority as priority_engine
 from app.engines import reward, trust
@@ -270,9 +271,22 @@ def _attach_as_corroboration(
     if already is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "You have already reported this issue")
 
+    # The two graph terms come from the contribution history; the other two
+    # from this submission. See engines/collusion.py for why entanglement is
+    # measured as a ratio of each account's own activity.
+    beneficiaries = collusion.beneficiaries(db, issue.id)
+    entangled_with, entanglement = collusion.worst_pair(db, user.id, beneficiaries)
+    history = (
+        collusion.pair_history(db, user.id, entangled_with)
+        if entangled_with is not None
+        else None
+    )
+
     rho = conf.independence_weight(
-        shared_device=_shares_device(db, issue, user),
-        temporal_burst=_is_burst(db, issue),
+        shared_device=1.0 if _shares_device(db, issue, user) else 0.0,
+        temporal_burst=1.0 if _is_burst(db, issue) else 0.0,
+        flagged_collusion=entanglement,
+        reciprocal_pair=1.0 if (history is not None and history.is_reciprocal) else 0.0,
     )
     db.add(
         Report(
@@ -303,8 +317,16 @@ def _attach_as_corroboration(
         stages_already_passed=lifecycle.stages_passed(issue),
     )
     lifecycle.log_event(
-        db, issue, "CORROBORATED", actor_id=user.id, rho=round(rho, 4),
+        db,
+        issue,
+        "CORROBORATED",
+        actor_id=user.id,
+        rho=round(rho, 4),
         confidence=round(issue.confidence, 4),
+        # Recorded so a discounted corroboration can be explained later rather
+        # than just being quietly worth less.
+        collusion=round(entanglement, 4),
+        entangled_with=str(entangled_with) if entanglement > 0 else None,
     )
 
     message = "This matched an existing issue nearby, so it was recorded as corroboration."

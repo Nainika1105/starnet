@@ -81,7 +81,7 @@ cd ../api && STARNET_SEED_ON_STARTUP=true ./.venv/bin/uvicorn app.main:app --rel
 cd api && ./.venv/bin/python -m pytest tests/ -q
 ```
 
-117 tests. The ones that touch the database need Postgres; the config, signal, storage and rate-limit tests are pure and run without it.
+140 tests. The ones that touch the database need Postgres; the config, signal, storage and rate-limit tests are pure and run without it.
 
 | File | Covers |
 | --- | --- |
@@ -93,6 +93,7 @@ cd api && ./.venv/bin/python -m pytest tests/ -q
 | `test_config_guard.py` | That an unsafe production configuration refuses to boot |
 | `test_migrations.py` | That the migrations build the schema from a bare database, that the models have not drifted from them, and that applying them does not silence the app's logging |
 | `test_ratelimit.py` | The credential limits: window sliding, bounded key space, thread safety, that a spoofable header is not trusted, and that an unknown address costs the same work as a known one |
+| `test_collusion.py` | The take-turns ring, and the honest patterns that resemble it: a prolific volunteer, two neighbours on one street, and the first users of a small deployment |
 
 ---
 
@@ -135,10 +136,38 @@ could be gamed if it bent:
 - **Nobody with a stake decides.** Reporters are excluded, and so is anyone holding a contribution
   on the issue in *any* role — including the on-site verifier, who has already staked their
   reputation on the fault being real. One person cannot carry an issue from report to payout.
+- **Evidence before privileges.** A tier needs observations, not just a good
+  ratio: one confirmed report alone puts a brand-new account at 0.667, over the
+  TRUSTED line, which would grant the right to release somebody else's 45% on a
+  single data point. The Beta prior keeps the score honest at low evidence;
+  `tier_min_evidence` keeps the privileges honest too.
 - **Tier gates.** A verification admits work to the city's queue, so it demands
   `VERIFIER_ELIGIBLE` with no fallback: if nobody eligible is reachable, the issue waits, unpaid
   and unrejected. A fix-confirmation falls back to `TRUSTED`, because refusing to route one would
   cost honest reporters their final 45% over the city's thin verifier coverage.
+
+It also refuses a settler who is **entangled with the people the settlement
+would pay**. The per-issue rules above do nothing about two accounts taking
+turns across many issues — A reports and B confirms, then B reports and A
+confirms — and every one of those issues passes every per-issue check while
+the pair mints the confirmation slice, 45% of the pool, at will. That is only
+visible in aggregate, so `engines/collusion.py` scores it as an edge in the
+graph of who appears alongside whom, and routing vetoes above a threshold.
+
+Three things keep that from punishing honest users, and each has a test:
+entanglement is a **ratio** of each account's own activity, never an absolute
+count, because two neighbours who genuinely report the same street for years
+would look identical to a ring under a raw threshold; a pair needs a minimum of
+shared history before any ratio is computed; and both accounts need a minimum
+of total activity, because in a small or new deployment there is hardly anybody
+else to have worked with and every pair looks exclusive. Swapping claim and
+settle roles amplifies the score, since that is the ring's actual signature
+rather than merely a working relationship.
+
+Entanglement is measured only against the **claim side** — the discoverer and
+corroborators — because a verifier's fee already vested at verification and a
+confirmer who knows the verifier unlocks nothing for them. Measuring against
+every contributor starved routing entirely in a small deployment.
 
 Within those candidates, routing prefers whoever is likeliest to actually walk past the spot
 (great-circle distance from their own last report, via PostGIS), then spreads load, then prefers
@@ -217,7 +246,7 @@ Each is isolated behind a function or flag so the real version drops in without 
 | Notifications of a routed task — the user has to open the Tasks tab | `routers/tasks.py` | Push, so a verify task reaches someone while they are still near the spot |
 | Clustering predicate — same category, within 30 m, inside 48 h | `routers/reports.py: find_cluster_match` | HDBSCAN over a combined distance that adds CLIP embedding similarity to the metres, so two photos of one pothole from opposite kerbs cluster and two faults at one junction do not |
 | Base rates for exposure, vulnerability, escalation and `ρ̂(ℓ)` — per-ward and per-category constants | `engines/priority.py` | Traffic counts, POI lookups for schools and hospitals, weather-aware escalation. (The escalation term's growth with age is computed, not a constant.) |
-| Collusion flags — device match and co-submission burst only; `flagged_collusion` and `reciprocal_pair` are never set | `routers/reports.py`, `engines/confidence.py: independence_weight` | Co-corroboration graph with reciprocity and repeated-pair detection |
+| Device fingerprinting — the client supplies the value, so it is trusted input | `models.py: User.device_fingerprint` | Attested device identity, or at least a fingerprint derived server-side |
 | Photo storage — local volume | `app/storage.py` | S3 or Supabase storage behind the same `save`/`url_for` interface |
 | Redemption catalogue — static list | `app/catalog.py` | Partner coupon and municipal credit integrations |
 | Notifications — in-app only | — | FCM |

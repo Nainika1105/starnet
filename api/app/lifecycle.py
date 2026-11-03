@@ -184,6 +184,9 @@ def open_confirmation_task(db: Session, issue: Issue) -> Task | None:
         assignee=str(picked.user.id),
         distance_m=round(picked.distance_m) if picked.distance_m is not None else None,
         open_tasks=picked.open_tasks,
+        # Recorded so "the system chose this person" is auditable rather than
+        # asserted: an admin can see the entanglement score it chose against.
+        collusion=round(picked.collusion, 4),
     )
     return task
 
@@ -320,6 +323,9 @@ def open_verification_task(
         assignee=str(picked.user.id),
         distance_m=round(picked.distance_m) if picked.distance_m is not None else None,
         open_tasks=picked.open_tasks,
+        # Recorded so "the system chose this person" is auditable rather than
+        # asserted: an admin can see the entanglement score it chose against.
+        collusion=round(picked.collusion, 4),
         reroute_count=reroute_count,
     )
     return task
