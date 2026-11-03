@@ -81,7 +81,7 @@ cd ../api && STARNET_SEED_ON_STARTUP=true ./.venv/bin/uvicorn app.main:app --rel
 cd api && ./.venv/bin/python -m pytest tests/ -q
 ```
 
-63 tests, all against a real Postgres.
+89 tests. The ones that touch the database need Postgres; the config, signal and storage tests are pure and run without it.
 
 | File | Covers |
 | --- | --- |
@@ -89,6 +89,8 @@ cd api && ./.venv/bin/python -m pytest tests/ -q
 | `test_signals.py` | EXIF parsing and GPS/time coherence, impossible-travel detection, the confidence fusion's decision bands, corroboration saturation, priority ageing, equity bounds |
 | `test_routing.py` | The independence rules, tier gates, proximity and load-spreading, verify-task expiry and re-routing |
 | `test_clustering.py` | Dedup → corroboration through the real HTTP endpoint, and reopen-on-re-report with its ledger reversal |
+| `test_storage.py` | That the stored photo carries none of the EXIF read off the upload, and both storage backends' contracts |
+| `test_config_guard.py` | That an unsafe production configuration refuses to boot |
 
 ---
 
@@ -229,6 +231,115 @@ fall under `θ_lo`.
 
 The image model · the collusion graph · category-specific trust · work-order reconciliation beyond
 a manual close · richer dashboards and onboarding.
+
+---
+
+## Deploying
+
+The target this is configured for is **Fly.io for the API, Supabase for Postgres
+and photo storage, and the dashboard as static files**. Nothing about the code
+is specific to those; the API is a plain container, the database is plain
+Postgres with PostGIS, and storage is any S3-compatible bucket.
+
+### The production guard
+
+`STARNET_ENVIRONMENT=production` makes the API **refuse to boot** if the
+configuration would be unsafe to expose, and it lists every problem at once
+rather than one per restart:
+
+| It refuses | Because |
+| --- | --- |
+| the dev JWT secret, or one under 32 chars | anyone who knows it can mint a token for any account, admin included |
+| `STARNET_SEED_ON_STARTUP=true` | the seed creates six accounts sharing the password printed in this README, one of them the city admin |
+| an empty `STARNET_CORS_ORIGINS` | it would silently fall back to localhost |
+| `STARNET_STORAGE_BACKEND=local` | on an ephemeral filesystem every photo is lost on redeploy, and the photos are the evidence the whole mechanism rests on |
+
+The last one is the only check you might legitimately override — set it
+deliberately if `STARNET_MEDIA_ROOT` is a genuinely persistent mounted disk.
+
+### 1. Database and storage (Supabase)
+
+Create a project, then a **private** storage bucket for the photos. PostGIS
+ships enabled, but the app runs `CREATE EXTENSION IF NOT EXISTS postgis` at
+startup anyway, so the role needs rights to do that once.
+
+Take the pooled connection string (port 6543) rather than the direct one — Fly
+machines reconnect, and the pooler handles that better — and rewrite its scheme
+for psycopg 3:
+
+```
+postgresql+psycopg://postgres.<ref>:<password>@<host>:6543/postgres
+```
+
+Storage credentials come from the project's S3 access keys, not the anon key:
+
+```
+STARNET_S3_ENDPOINT_URL=https://<ref>.supabase.co/storage/v1/s3
+STARNET_S3_REGION=<the project's region>
+STARNET_S3_BUCKET=starnet-photos
+```
+
+### 2. API (Fly)
+
+`api/fly.toml` is committed; secrets are not.
+
+```bash
+cd api
+fly auth login
+fly launch --no-deploy --copy-config --name starnet-api
+fly secrets set \
+  STARNET_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')" \
+  STARNET_DATABASE_URL="postgresql+psycopg://..." \
+  STARNET_CORS_ORIGINS="https://your-dashboard-host" \
+  STARNET_S3_BUCKET="starnet-photos" \
+  STARNET_S3_ENDPOINT_URL="https://<ref>.supabase.co/storage/v1/s3" \
+  STARNET_S3_REGION="<region>" \
+  STARNET_S3_ACCESS_KEY_ID="..." \
+  STARNET_S3_SECRET_ACCESS_KEY="..."
+fly deploy
+```
+
+`min_machines_running = 1` and no horizontal scaling is deliberate: APScheduler
+runs **inside** the API process, so a second machine is a second scheduler —
+confirmation windows expired twice, issues reopened twice. The ledger's
+idempotency keys stop that double-paying anyone, but the lifecycle events would
+still duplicate. Scaling out needs the Celery/Redis swap first.
+
+### 3. Dashboard (static)
+
+The admin `Dockerfile`'s default target builds static assets and serves them
+from nginx. Vite **inlines** env vars at build time, so the API URL is a build
+argument and not a runtime variable — a rebuild is needed to repoint it.
+
+```bash
+cd admin
+docker build --build-arg VITE_API_BASE=https://starnet-api.fly.dev -t starnet-admin .
+```
+
+Any static host works equally well: `npm run build` with
+`VITE_API_BASE=https://starnet-api.fly.dev` and upload `dist/`.
+
+### 4. Mobile
+
+Point `expo.extra.apiBase` in `mobile/app.json` at the deployed API and run
+`npx expo start`. App-store distribution is a separate track — it needs EAS
+Build plus Apple and Google developer accounts, and is not configured here.
+
+### Before you call it production
+
+Two things are still missing, and both are real:
+
+- **No migrations.** Schema is created with SQLAlchemy's `create_all`, which
+  builds a fresh database correctly but cannot alter an existing one. The next
+  schema change needs Alembic, or it needs the database rebuilt. This is the
+  first thing to fix after a first deploy.
+- **No rate limiting at the edge.** The per-user report caps are enforced in
+  the app, but there is nothing in front of `/auth/login` to slow password
+  guessing. Fly can do this, or put a proxy in front.
+
+Beyond that: no error tracking, no backups configured beyond whatever the
+database provider does by default, and the trust and confidence coefficients
+are reasoned rather than fitted to real reports.
 
 ---
 

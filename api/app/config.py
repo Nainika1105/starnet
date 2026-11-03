@@ -21,8 +21,27 @@ class Settings(BaseSettings):
     jwt_secret: str = DEV_JWT_SECRET
     jwt_algorithm: str = "HS256"
     jwt_ttl_minutes: int = 60 * 24 * 7
-    media_root: str = "./media"
     seed_on_startup: bool = False
+
+    # --- photo storage ----------------------------------------------------
+    # "local" (a directory served at /media) or "s3" (any S3-compatible store:
+    # AWS, Supabase Storage, Cloudflare R2, MinIO).
+    #
+    # On a platform with an ephemeral filesystem, "local" loses every photo on
+    # redeploy -- and the photos are the evidence the reward mechanism rests
+    # on, so the production guard below treats that as a misconfiguration.
+    storage_backend: str = "local"
+    media_root: str = "./media"
+
+    s3_bucket: str = ""
+    s3_endpoint_url: str = ""   # empty = real AWS; set it for Supabase/R2/MinIO
+    s3_region: str = "us-east-1"
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    # Photos are served as presigned URLs rather than public objects. An hour
+    # is long enough for a dashboard session and short enough that a leaked
+    # URL stops working.
+    s3_url_ttl_seconds: int = 3600
 
     # "development" or "production". Production is not a cosmetic label: it
     # makes the app refuse to start with the dev JWT secret, with the demo
@@ -70,6 +89,14 @@ class Settings(BaseSettings):
             problems.append(
                 "STARNET_CORS_ORIGINS is empty, which would fall back to localhost. "
                 "Set it to the dashboard's real origin."
+            )
+        if self.storage_backend.strip().lower() == "local":
+            problems.append(
+                "STARNET_STORAGE_BACKEND is 'local'. On a host with an ephemeral "
+                "filesystem every photo is lost on redeploy, and the photographs "
+                "are the evidence the vesting mechanism rests on. Use 's3' with "
+                "object storage, or set this deliberately if STARNET_MEDIA_ROOT is "
+                "a genuinely persistent mounted disk."
             )
         return problems
 

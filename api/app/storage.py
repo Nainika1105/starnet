@@ -1,13 +1,23 @@
-"""Photo storage behind a narrow interface.
+"""Photo storage behind a narrow interface: `save` and `url_for`.
 
-STUB: Phase 1 writes to a local volume served by the API. The interface is the
-seam for S3 / Supabase storage -- `save` and `url_for` are all a backend needs
-to implement.
+Two backends, chosen by STARNET_STORAGE_BACKEND:
 
-EXIF handling is not a stub: we read the capture time and GPS we need for the
-geo coherence check, then write the image back stripped of everything else, so
-we are not storing a photo that leaks the reporter's camera serial and full
-location history.
+  local  A directory the API serves at /media. Fine for development, and wrong
+         for most deployments: a container filesystem is ephemeral, so the
+         photos -- which ARE the evidence this whole mechanism rests on -- are
+         lost on the next redeploy.
+  s3     Any S3-compatible object store: AWS, Supabase Storage, Cloudflare R2,
+         MinIO. Objects are written private and handed out as presigned URLs,
+         so a photo is not world-readable just because someone guessed a key.
+
+The split matters more here than in a typical app. A reward that vests on a
+photographed repair is only auditable for as long as the photographs exist.
+
+EXIF handling is not a stub: we read the capture time and GPS the geo-coherence
+check needs, then write the image back stripped of everything else, so we are
+not storing a photo that leaks the reporter's camera serial and full location
+history. That happens before upload, so the stripped image is the only one that
+ever leaves the process.
 """
 from __future__ import annotations
 
@@ -123,23 +133,114 @@ def read_exif_time(raw: bytes) -> datetime | None:
     return read_photo_meta(raw).captured_at
 
 
-def save(raw: bytes, *, suffix: str = ".jpg") -> str:
-    """Persist the photo with EXIF stripped. Returns a storage key."""
-    key = f"{uuid.uuid4().hex}{suffix}"
-    target = _media_root() / key
+def strip_exif(raw: bytes, *, suffix: str = ".jpg") -> bytes:
+    """Re-encode the image with no EXIF at all.
 
+    Done by copying the pixels into a fresh image rather than by deleting tags,
+    because `getexif()` does not see every place a camera can hide metadata --
+    maker notes, XMP packets and embedded thumbnails all survive a tag delete.
+    Copying the pixels leaves nothing behind by construction.
+
+    Undecodable bytes are returned unchanged: a corrupt upload is still the
+    evidence someone submitted, and the geo score already accounts for it.
+    """
     try:
         with Image.open(io.BytesIO(raw)) as img:
             clean = Image.new(img.mode, img.size)
             clean.putdata(list(img.getdata()))
-            clean.save(target, format="JPEG" if suffix in (".jpg", ".jpeg") else None)
+            buf = io.BytesIO()
+            clean.save(buf, format="JPEG" if suffix in (".jpg", ".jpeg") else None)
+            return buf.getvalue()
     except Exception:
-        # Not a decodable image -- store the bytes as given rather than losing
-        # the evidence. The geo check will score it accordingly.
-        target.write_bytes(raw)
+        return raw
 
+
+def _backend() -> str:
+    return settings.storage_backend.strip().lower()
+
+
+# --- s3-compatible ---------------------------------------------------------
+
+
+def _s3_client():
+    """Lazily built, so a local deployment never needs boto3 installed."""
+    try:
+        import boto3
+        from botocore.config import Config
+    except ModuleNotFoundError as exc:  # pragma: no cover - import guard
+        raise RuntimeError(
+            "STARNET_STORAGE_BACKEND=s3 needs boto3. Install it with "
+            "`pip install -r requirements.txt`."
+        ) from exc
+
+    missing = [
+        name
+        for name, value in (
+            ("STARNET_S3_BUCKET", settings.s3_bucket),
+            ("STARNET_S3_ACCESS_KEY_ID", settings.s3_access_key_id),
+            ("STARNET_S3_SECRET_ACCESS_KEY", settings.s3_secret_access_key),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(
+            "STARNET_STORAGE_BACKEND=s3 but these are unset: " + ", ".join(missing)
+        )
+
+    return boto3.client(
+        "s3",
+        endpoint_url=settings.s3_endpoint_url or None,
+        region_name=settings.s3_region,
+        aws_access_key_id=settings.s3_access_key_id,
+        aws_secret_access_key=settings.s3_secret_access_key,
+        # Supabase Storage, R2 and MinIO all want path-style addressing;
+        # virtual-host style assumes a bucket subdomain they do not serve.
+        config=Config(s3={"addressing_style": "path"}, signature_version="s3v4"),
+    )
+
+
+def save(raw: bytes, *, suffix: str = ".jpg") -> str:
+    """Persist the photo with EXIF stripped. Returns a storage key.
+
+    The key is the only thing the database holds. Nothing about where the bytes
+    live leaks into the schema, so switching backends does not require a data
+    migration -- only moving the objects.
+    """
+    key = f"{uuid.uuid4().hex}{suffix}"
+    clean = strip_exif(raw, suffix=suffix)
+
+    if _backend() == "s3":
+        _s3_client().put_object(
+            Bucket=settings.s3_bucket,
+            Key=key,
+            Body=clean,
+            ContentType="image/jpeg",
+            # No public-read ACL: these are photographs of identifiable places
+            # taken by identifiable people, handed out through presigned URLs
+            # rather than left readable to anyone who guesses a key.
+            CacheControl="private, max-age=31536000",
+        )
+        return key
+
+    (_media_root() / key).write_bytes(clean)
     return key
 
 
 def url_for(key: str | None) -> str | None:
-    return f"/media/{key}" if key else None
+    """A URL the dashboard or app can load the photo from.
+
+    For s3 this is a presigned GET, signed locally with no network call, so
+    generating one per report in a list response costs nothing. It expires,
+    which is the point: a URL that leaks stops working.
+    """
+    if not key:
+        return None
+
+    if _backend() == "s3":
+        return _s3_client().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": settings.s3_bucket, "Key": key},
+            ExpiresIn=settings.s3_url_ttl_seconds,
+        )
+
+    return f"/media/{key}"

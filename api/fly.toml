@@ -1,0 +1,43 @@
+# Fly.io configuration for the STAR-Net API.
+#
+# Deploy from the api/ directory:  fly deploy
+# Secrets are NOT set here -- see the deployment section of the README. Anything
+# in this file is committed and therefore public.
+
+app = "starnet-api"
+primary_region = "sin"          # Singapore: nearest Fly region to ap-south-1
+kill_signal = "SIGINT"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  STARNET_ENVIRONMENT = "production"
+  STARNET_SEED_ON_STARTUP = "false"
+  STARNET_STORAGE_BACKEND = "s3"
+  STARNET_CONFIDENCE_MODE = "fusion"
+  STARNET_CLUSTERING_ENABLED = "true"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # Exactly one machine, deliberately. APScheduler runs inside the API process,
+  # so a second machine means a second scheduler: confirmation windows would be
+  # expired twice and issues reopened twice. The ledger's idempotency keys stop
+  # that double-paying anyone, but the lifecycle events would still duplicate.
+  # Scaling out needs the Celery/Redis swap described in the README first.
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"             # 256mb is tight once Pillow decodes an image

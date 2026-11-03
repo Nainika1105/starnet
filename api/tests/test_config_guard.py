@@ -21,6 +21,7 @@ def _settings(**overrides) -> Settings:
         jwt_secret=REAL_SECRET,
         cors_origins=ORIGINS,
         seed_on_startup=False,
+        storage_backend="s3",
     )
     return Settings(**{**base, **overrides})
 
@@ -39,6 +40,13 @@ def test_a_short_secret_is_rejected():
     assert any("JWT_SECRET" in p for p in _settings(jwt_secret="shortish").production_problems())
 
 
+def test_ephemeral_local_storage_is_rejected():
+    """Losing every photo on redeploy destroys the audit trail the reward
+    mechanism depends on, so it is a misconfiguration, not a preference."""
+    problems = _settings(storage_backend="local").production_problems()
+    assert any("STORAGE_BACKEND" in p for p in problems)
+
+
 def test_the_demo_seed_is_rejected():
     """Six accounts sharing a password printed in the README, one an admin."""
     problems = _settings(seed_on_startup=True).production_problems()
@@ -50,11 +58,27 @@ def test_an_empty_cors_allowlist_is_rejected():
 
 
 def test_every_problem_is_reported_at_once():
-    """One failed boot should list everything, not one item per restart."""
+    """One failed boot should list everything, not one item per restart.
+
+    Asserted by category rather than by count, so adding a new check does not
+    make this fail for the wrong reason.
+    """
     problems = _settings(
-        jwt_secret=DEV_JWT_SECRET, seed_on_startup=True, cors_origins=""
+        jwt_secret=DEV_JWT_SECRET,
+        seed_on_startup=True,
+        cors_origins="",
+        storage_backend="local",
     ).production_problems()
-    assert len(problems) == 3
+
+    reported = " | ".join(problems)
+    for setting in (
+        "JWT_SECRET",
+        "SEED_ON_STARTUP",
+        "CORS_ORIGINS",
+        "STORAGE_BACKEND",
+    ):
+        assert setting in reported, setting
+    assert len(problems) == 4
 
 
 def test_development_is_unaffected():

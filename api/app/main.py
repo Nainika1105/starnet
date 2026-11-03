@@ -122,8 +122,12 @@ app.add_middleware(
 for r in (auth.router, reports.router, issues.router, tasks.router, wallet.router, admin.router):
     app.include_router(r)
 
-Path(settings.media_root).mkdir(parents=True, exist_ok=True)
-app.mount("/media", StaticFiles(directory=settings.media_root), name="media")
+# Only the local backend serves photos from this process. With object storage
+# the API never proxies the bytes -- `storage.url_for` hands out a presigned URL
+# and the client fetches it directly.
+if settings.storage_backend.strip().lower() != "s3":
+    Path(settings.media_root).mkdir(parents=True, exist_ok=True)
+    app.mount("/media", StaticFiles(directory=settings.media_root), name="media")
 
 
 @app.get("/health", tags=["meta"])
