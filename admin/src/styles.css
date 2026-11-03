@@ -157,3 +157,184 @@ input, select {
 .amount.pos { color: var(--ok); }
 .amount.neg { color: var(--danger); }
 .note { background: var(--accent-soft); border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+
+/* ---------------------------------------------------------------------------
+   Citizen views. Added alongside the municipal dashboard rather than as a
+   separate app, because the two sides share one sign-in and one URL. Every
+   colour here comes from the tokens above so both themes stay consistent.
+   --------------------------------------------------------------------------- */
+
+.field { display: grid; gap: 5px; margin-bottom: 14px; }
+.field > label {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.field input,
+.field select,
+.field textarea {
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  min-width: 0;
+}
+.field textarea { resize: vertical; }
+.field .row { gap: 8px; flex-wrap: wrap; }
+.field .row input { flex: 1 1 120px; }
+
+.eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: block;
+}
+
+.banner {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  font-size: 0.88rem;
+  margin: 12px 0;
+}
+.banner strong { font-weight: 600; }
+.banner.ok { border-left-color: var(--ok); }
+.banner.warn { border-left-color: var(--warn); }
+.banner.bad { border-left-color: var(--danger); }
+
+.tag {
+  display: inline-block;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.tag.ok { color: var(--ok); border-color: var(--ok); }
+.tag.warn { color: var(--warn); border-color: var(--warn); }
+.tag.bad { color: var(--danger); border-color: var(--danger); }
+.warn-text { color: var(--warn); }
+.num.neg { color: var(--danger); }
+
+/* --- capture ------------------------------------------------------------- */
+.capture { display: grid; gap: 10px; }
+.capture-shot {
+  width: 100%;
+  max-width: 420px;
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  display: block;
+}
+.capture-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: grid;
+  gap: 6px;
+  max-width: 480px;
+}
+.capture-empty p { margin: 0; }
+
+/* --- wallet -------------------------------------------------------------- */
+.wallet-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin: 12px 0 14px;
+}
+.wallet-figures > div { min-width: 0; }
+.figure {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 1.7rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  display: block;
+}
+.figure.amber { color: var(--warn); }
+.figure.small-figure { font-size: 1rem; }
+
+.catalog { display: grid; gap: 10px; margin-top: 12px; }
+.catalog-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.catalog-item h3 { margin: 0 0 2px; font-size: 0.95rem; }
+.catalog-item p { margin: 0; max-width: 46ch; }
+
+/* --- tasks --------------------------------------------------------------- */
+.task-list { display: grid; gap: 16px; margin-top: 12px; }
+.task {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+.task-head { display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; }
+.task-head > div { min-width: 0; flex: 1 1 220px; }
+.task-head h3 { margin: 6px 0 4px; font-size: 1rem; }
+.task-head p { margin: 0; }
+.thumb {
+  width: 120px;
+  height: 90px;
+  object-fit: cover;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.detail-photo {
+  width: 100%;
+  max-width: 360px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  margin-bottom: 12px;
+  display: block;
+}
+
+/* --- sign-in ------------------------------------------------------------- */
+.login-card { max-width: 640px; margin: 32px auto; }
+.account-list { display: grid; gap: 8px; margin: 14px 0; }
+.account {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  font: inherit;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+.account:hover:not(:disabled) { border-color: var(--accent); }
+.account:disabled { opacity: 0.55; cursor: not-allowed; }
+.account-name { font-weight: 600; }
+.account-role { font-size: 0.82rem; color: var(--accent); }
+.account-note { display: block; }
+.other-signin { margin-top: 10px; }
+.other-signin summary { cursor: pointer; color: var(--accent); font-size: 0.88rem; }
+.other-signin form { margin-top: 12px; }
+
+/* --- split layout -------------------------------------------------------- */
+.split { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; align-items: start; }
+.split > * { min-width: 0; }
+@media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+
+.btn.danger { color: var(--danger); border-color: var(--danger); }

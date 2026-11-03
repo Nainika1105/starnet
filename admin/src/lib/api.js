@@ -5,7 +5,8 @@
 const RAW = import.meta.env.VITE_API_BASE
 const BASE = RAW === undefined ? 'http://localhost:8000' : RAW
 
-const TOKEN_KEY = 'starnet.admin.token'
+// Both the municipal and citizen views share this app and this token.
+const TOKEN_KEY = 'starnet.token'
 
 export function getToken() {
   try {
@@ -24,8 +25,10 @@ export function setToken(token) {
   }
 }
 
-async function request(path, { method = 'GET', body, auth = true } = {}) {
+async function request(path, { method = 'GET', body, form, auth = true } = {}) {
   const headers = {}
+  // FormData sets its own Content-Type with the multipart boundary; setting it
+  // by hand produces a request the server cannot parse.
   if (body !== undefined) headers['Content-Type'] = 'application/json'
   if (auth) {
     const token = getToken()
@@ -35,7 +38,7 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: form !== undefined ? form : body === undefined ? undefined : JSON.stringify(body),
   })
 
   if (!res.ok) {
@@ -64,7 +67,7 @@ export const api = {
     ).toString()
     return request(`/admin/queue${qs ? `?${qs}` : ''}`)
   },
-  issue: (id) => request(`/admin/issues/${id}`),
+  adminIssue: (id) => request(`/admin/issues/${id}`),
   assign: (id, assignee_label) =>
     request(`/admin/issues/${id}/assign`, { method: 'POST', body: { assignee_label } }),
   resolve: (id) => request(`/admin/issues/${id}/resolve`, { method: 'POST' }),
@@ -77,6 +80,45 @@ export const api = {
   metrics: () => request('/admin/metrics'),
   ledger: () => request('/admin/ledger'),
   allIssues: () => request('/issues?limit=500', { auth: false }),
+
+  // --- citizen side ------------------------------------------------------
+  signup: (email, password, handle, home_ward) =>
+    request('/auth/signup', {
+      method: 'POST',
+      body: { email, password, handle, home_ward },
+      auth: false,
+    }),
+
+  issue: (id) => request(`/issues/${id}`),
+
+  submitReport: ({ category, lat, lng, description, photo }) => {
+    const form = new FormData()
+    form.append('category', category)
+    form.append('lat', String(lat))
+    form.append('lng', String(lng))
+    if (description) form.append('description', description)
+    if (photo) form.append('photo', photo, 'report.jpg')
+    return request('/reports', { method: 'POST', form })
+  },
+
+  corroborate: (id, lat, lng, description) =>
+    request(`/issues/${id}/corroborate`, {
+      method: 'POST',
+      body: { lat, lng, description },
+    }),
+
+  myTasks: () => request('/tasks/me'),
+
+  completeTask: (id, verdict, photo) => {
+    const form = new FormData()
+    form.append('verdict', verdict)
+    if (photo) form.append('photo', photo, 'confirm.jpg')
+    return request(`/tasks/${id}/complete`, { method: 'POST', form })
+  },
+
+  wallet: () => request('/wallet/me'),
+  catalog: () => request('/wallet/catalog'),
+  redeem: (sku, nonce) => request('/wallet/redeem', { method: 'POST', body: { sku, nonce } }),
 }
 
 export const mediaUrl = (path) => (path ? `${BASE}${path}` : null)

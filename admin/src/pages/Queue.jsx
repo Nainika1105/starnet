@@ -44,7 +44,7 @@ export default function Queue() {
       setDetail(null)
       return
     }
-    api.issue(selectedId).then(setDetail).catch((e) => setError(e.message))
+    api.adminIssue(selectedId).then(setDetail).catch((e) => setError(e.message))
   }, [selectedId])
 
   async function act(fn) {

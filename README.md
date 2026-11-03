@@ -24,9 +24,29 @@ That is the whole thing: one command, two containers, and **one URL**.
 
 | Surface | URL | Sign in |
 | --- | --- | --- |
-| Municipal dashboard | **http://localhost:8000** | `admin@starnet.demo` / `starnet123` |
+| The whole app | **http://localhost:8000** | Buttons for every seeded account; password `starnet123` |
 | API docs (OpenAPI) | http://localhost:8000/docs | — |
 | Mechanism knobs | http://localhost:8000/config/mechanism | — |
+
+**Both sides are in the browser.** Which view you get depends on the account,
+not the URL: `city_admin` opens the municipal dashboard (queue, accountability,
+ledger), and the citizen accounts open the citizen side — report a fault, see
+what is nearby, action the tasks routed to you, and watch your own points move
+from conditional to released.
+
+The sign-in page offers each seeded account as a button, because the mechanism
+only makes sense if you can be several people in turn: a reporter cannot verify
+their own fault, and neither of them can confirm the repair. Walk it as
+`vikram_s`, then as whoever the verify task was routed to, then resolve it as
+`city_admin`, then confirm it as a third person.
+
+The phone app (`/mobile`) is still the real citizen client, with a genuine
+camera. The browser version exists so the whole chain is visible from one link.
+One honest difference: **a browser capture carries no EXIF**, so the geo and
+timestamp checks have less to read and a browser report scores lower than the
+same report from the phone. That is left as it is rather than papered over with
+a client-supplied "this is live" field, which would be forgeable and would hand
+free credibility to whoever lied.
 
 The API image builds the dashboard and serves it at `/`, so one host answers
 for both. That means one link to open or share and no CORS to configure —
