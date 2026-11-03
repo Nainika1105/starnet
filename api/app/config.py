@@ -185,6 +185,52 @@ class Settings(BaseSettings):
     max_reports_per_day: int = 40
     max_travel_speed_kmh: float = 120.0
 
+    # --- credential endpoint limits ---------------------------------------
+    # Two buckets, because the two attacks have different shapes.
+    #
+    # Per account, in two bands, because one window cannot do both jobs.
+    #
+    # A throttled account is refused even with the right password -- the check
+    # runs before the hash comparison, so a throttled attacker gets no signal
+    # at all, not even a timing one. That is the safe choice, but it means
+    # anyone who knows an address can deny its owner access for the length of
+    # the window. So the burst window is kept SHORT: eight wrong passwords is
+    # far beyond mistyping, and the owner waits two minutes, not a quarter of
+    # an hour.
+    #
+    # Two minutes alone would leave ~5,700 guesses a day, which is enough to
+    # find a weak password, so a second much longer band caps the sustained
+    # rate. Together: a legitimate user is never locked out for long, and an
+    # attacker gets fifty guesses a day against any one account.
+    login_max_attempts_per_account: int = 8
+    login_window_seconds: float = 120.0           # the burst band
+    login_max_attempts_per_account_daily: int = 50
+    login_account_daily_window_seconds: float = 86_400.0
+    #
+    # Per address defends against enumeration across many accounts, and is
+    # deliberately loose, because an address is a bad proxy for a person:
+    # an office, a campus or a phone network puts hundreds of legitimate users
+    # behind one NAT. Tight per-IP limits lock out a building to inconvenience
+    # one attacker, and the per-account bucket is what stops the guessing
+    # anyway.
+    login_max_attempts_per_ip: int = 50
+
+    # Same NAT reasoning. The job here is to stop somebody farming hundreds of
+    # sybil accounts, not to ration a classroom signing up together -- and the
+    # mechanism already makes sybils unprofitable, since a fabricated report
+    # can collect at most g_v * f_D of a pool.
+    signup_max_per_ip: int = 30
+    signup_window_seconds: float = 3600.0
+
+    # Name of a header carrying the caller's real address, for when the API
+    # sits behind a proxy -- "Fly-Client-IP" on Fly, "CF-Connecting-IP" behind
+    # Cloudflare. Empty means use the socket peer.
+    #
+    # It must be a header the proxy OVERWRITES. Pointing this at
+    # X-Forwarded-For would let a caller set their own key and sidestep the
+    # limit entirely, since a fresh key is never over its limit.
+    client_ip_header: str = ""
+
     # --- verification routing --------------------------------------------
     # A verify task nobody actions is re-routed to the next-best verifier.
     # After max_verify_reroutes the issue waits rather than being rejected:

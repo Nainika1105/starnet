@@ -81,7 +81,7 @@ cd ../api && STARNET_SEED_ON_STARTUP=true ./.venv/bin/uvicorn app.main:app --rel
 cd api && ./.venv/bin/python -m pytest tests/ -q
 ```
 
-94 tests. The ones that touch the database need Postgres; the config, signal and storage tests are pure and run without it.
+117 tests. The ones that touch the database need Postgres; the config, signal, storage and rate-limit tests are pure and run without it.
 
 | File | Covers |
 | --- | --- |
@@ -92,6 +92,7 @@ cd api && ./.venv/bin/python -m pytest tests/ -q
 | `test_storage.py` | That the stored photo carries none of the EXIF read off the upload, and both storage backends' contracts |
 | `test_config_guard.py` | That an unsafe production configuration refuses to boot |
 | `test_migrations.py` | That the migrations build the schema from a bare database, that the models have not drifted from them, and that applying them does not silence the app's logging |
+| `test_ratelimit.py` | The credential limits: window sliding, bounded key space, thread safety, that a spoofable header is not trusted, and that an unknown address costs the same work as a known one |
 
 ---
 
@@ -355,15 +356,50 @@ If you have a database created by the old `create_all` path, it has no
 `alembic_version` table, so `upgrade` would try to create tables that exist.
 Stamp it once: `alembic stamp head`.
 
+### Credential limits
+
+`/auth/login` and `/auth/signup` are rate limited in process. Three buckets,
+because the attacks have different shapes:
+
+| Bucket | Default | Job |
+| --- | --- | --- |
+| per account, burst | 8 / 2 min | the brute-force defence |
+| per account, daily | 50 / 24 h | caps sustained guessing, which the short window alone would allow thousands of |
+| per address | 50 / 15 min | enumeration across many accounts |
+| sign-ups per address | 30 / h | account farming |
+
+Only **failed** logins count, and a success clears both account bands, so
+mistyping a password twice costs nothing.
+
+Two decisions worth knowing about. **A throttled account is refused even with
+the correct password** — the limit is checked before the hash comparison, so a
+throttled attacker gets no signal at all, not even a timing one. The cost is
+that anyone who knows an address can deny its owner access for the length of the
+window, which is why the burst window is two minutes rather than fifteen. And
+**the per-address limits are deliberately loose**, because an address is a poor
+proxy for a person: an office or a phone network puts hundreds of legitimate
+users behind one NAT, and tight per-IP limits lock out a building to
+inconvenience one attacker.
+
+Behind a proxy, set `STARNET_CLIENT_IP_HEADER` to a header the proxy
+*overwrites* — `Fly-Client-IP`, `CF-Connecting-IP`. Not `X-Forwarded-For`,
+which is appended to: keying on it would let a caller pick their own bucket and
+skip the limit entirely, since a fresh key is never over its limit.
+
+The counters are in memory, which has two honest consequences: a restart
+forgets them, and running several API instances divides the effective limit by
+the instance count. Both are fine for one machine, and both want the same
+shared backend the scheduler does when this scales out.
+
 ### Before you call it production
 
-- **No rate limiting at the edge.** The per-user report caps are enforced in
-  the app, but there is nothing in front of `/auth/login` to slow password
-  guessing. Fly can do this, or put a proxy in front.
 - **No error tracking and no backups** beyond whatever the database provider
   does by default.
 - The trust and confidence coefficients are reasoned rather than fitted to real
   reports, and `s_img` is still a constant.
+- `/auth/signup` still tells a caller when an address is already registered,
+  which is a mild enumeration oracle. Kept so the form can explain itself; the
+  rate limit is what stops it being enumerated at scale.
 
 ---
 

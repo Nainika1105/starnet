@@ -16,6 +16,12 @@ from app.models import User
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer = HTTPBearer(auto_error=False)
 
+# Compared against when a login names an address that does not exist, so the
+# endpoint spends the same ~100ms either way. Without it, response time answers
+# "is this email registered?" for anyone who asks. The value is a real bcrypt
+# hash of a random string; nothing can match it.
+DUMMY_PASSWORD_HASH = pwd_context.hash(uuid.uuid4().hex + uuid.uuid4().hex)
+
 
 def hash_password(raw: str) -> str:
     return pwd_context.hash(raw)
